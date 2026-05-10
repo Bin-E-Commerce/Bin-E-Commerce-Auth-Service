@@ -7,6 +7,7 @@ import { RedisModule } from "./database/redis/redis.module";
 import { KafkaModule } from "./kafka/kafka.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { UsersModule } from "./modules/users/users.module";
+import { HealthModule } from "./modules/health/health.module";
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { UsersModule } from "./modules/users/users.module";
     TerminusModule,
     RedisModule,
     KafkaModule,
+    HealthModule,
     AuthModule,
     UsersModule,
   ],
