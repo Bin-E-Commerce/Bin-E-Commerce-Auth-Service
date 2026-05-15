@@ -74,15 +74,28 @@ export class TokenService {
   // Lấy cặp access token và refresh token mới từ Keycloak bằng cách sử dụng Refresh Token Grant (dùng cho refresh token flow).
   // Lý do lấy cả refresh token mới là để thực hiện refresh token rotation
   // Tăng cường bảo mật bằng cách giảm thời gian sống của mỗi refresh token và phát hiện sớm nếu có token bị lộ.
-  async rotateRefreshToken(refreshToken: string): Promise<TokenPair> {
+  async rotateRefreshToken(
+    refreshToken: string,
+    clientId?: string,
+    clientSecret?: string,
+  ): Promise<TokenPair> {
+    // Cho phép override clientId và clientSecret khi gọi hàm này để hỗ trợ cả flow social auth (clientId = 'web-client')
+    // và flow đăng nhập thông thường (clientId = auth-service client). Nếu không override thì mặc định sẽ dùng auth-service client, phù hợp cho flow đăng nhập thông thường.
+    const effectiveClientId = clientId ?? this.clientId;
+    const effectiveClientSecret = clientSecret ?? this.clientSecret;
+
+    // Các parameter cần thiết để gọi token endpoint với grant_type = refresh_token, bao gồm refresh_token. Client ID và secret cũng được bao gồm nếu có.
+    const params: Record<string, string> = {
+      grant_type: "refresh_token",
+      client_id: effectiveClientId,
+      refresh_token: refreshToken,
+    };
+    // clientSecret có thể để trống nếu client được cấu hình là public client trong Keycloak, nhưng nếu có thì sẽ được bao gồm để tăng cường bảo mật cho flow refresh token.
+    if (effectiveClientSecret) params.client_secret = effectiveClientSecret;
+
     const response = await axios.post(
       this.tokenEndpoint,
-      new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-        refresh_token: refreshToken,
-      }).toString(),
+      new URLSearchParams(params).toString(),
       {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         validateStatus: () => true,
@@ -105,6 +118,8 @@ export class TokenService {
   async exchangeCode(
     code: string,
     redirectUri: string,
+    clientId?: string,
+    clientSecret?: string,
   ): Promise<{
     accessToken: string;
     refreshToken: string;
@@ -112,15 +127,23 @@ export class TokenService {
     expiresIn: number;
     refreshExpiresIn: number;
   }> {
+    // Cho phép override clientId và clientSecret khi gọi hàm này để hỗ trợ cả flow social auth (clientId = 'web-client')
+    // và flow đăng nhập thông thường (clientId = auth-service client). Nếu không override thì mặc định sẽ dùng auth-service client, phù hợp cho flow đăng nhập thông thường.
+    const effectiveClientId = clientId ?? this.clientId;
+    const effectiveClientSecret = clientSecret ?? this.clientSecret;
+
+    // Các parameter cần thiết để gọi token endpoint với grant_type = authorization_code, bao gồm code và redirect_uri. Client ID và secret cũng được bao gồm nếu có.
+    const params: Record<string, string> = {
+      grant_type: "authorization_code",
+      client_id: effectiveClientId,
+      code,
+      redirect_uri: redirectUri,
+    };
+    if (effectiveClientSecret) params.client_secret = effectiveClientSecret;
+
     const response = await axios.post(
       this.tokenEndpoint,
-      new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-        code,
-        redirect_uri: redirectUri,
-      }).toString(),
+      new URLSearchParams(params).toString(),
       {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         validateStatus: () => true,

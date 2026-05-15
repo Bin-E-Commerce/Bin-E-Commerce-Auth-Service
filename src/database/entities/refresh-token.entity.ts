@@ -51,4 +51,9 @@ export class RefreshToken {
   // User agent của người dùng khi tạo refresh token, hữu ích cho việc logging hoặc phát hiện hành vi đáng ngờ
   @Column({ name: "user_agent", type: "text", nullable: true })
   userAgent: string | null;
+
+  // Keycloak client_id dùng để phát hành token này — cần để rotate đúng client khi refresh
+  // Mặc định null = dùng auth-service client (password grant); 'web-client' = social login
+  @Column({ name: "client_id", type: "varchar", length: 100, nullable: true })
+  clientId: string | null;
 }

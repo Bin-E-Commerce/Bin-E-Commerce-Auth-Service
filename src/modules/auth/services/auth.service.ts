@@ -249,7 +249,20 @@ export class AuthService {
     this.socialStateStore.delete(dto.state);
 
     const redirectUri = `${this.config.get<string>("FRONTEND_URL", "http://localhost:5173")}/auth/callback`;
-    const tokens = await this.tokenService.exchangeCode(dto.code, redirectUri);
+    const webClientId = this.config.get<string>(
+      "KEYCLOAK_WEB_CLIENT_ID",
+      "web-client",
+    );
+    const webClientSecret = this.config.get<string>(
+      "KEYCLOAK_WEB_CLIENT_SECRET",
+      "",
+    );
+    const tokens = await this.tokenService.exchangeCode(
+      dto.code,
+      redirectUri,
+      webClientId,
+      webClientSecret,
+    );
 
     // Decode id_token to get user info (no verification needed — Keycloak already validated)
     const idPayload = jwt.decode(tokens.idToken) as Record<string, unknown>;
@@ -298,6 +311,7 @@ export class AuthService {
       tokens.refreshExpiresIn,
       ip,
       userAgent,
+      webClientId,
     );
 
     return {
@@ -346,7 +360,16 @@ export class AuthService {
     // Nếu token hợp lệ, sẽ gọi Keycloak để lấy cặp access token và refresh token mới.
     // Lý do lấy refresh token mới là để thực hiện refresh token rotation
     // Tăng cường bảo mật bằng cách giảm thời gian sống của mỗi refresh token và phát hiện sớm nếu có token bị lộ.
-    const tokens = await this.tokenService.rotateRefreshToken(rawRefreshToken);
+    // Dùng đúng client_id đã phát hành token (web-client cho social login, auth-service cho password login)
+    const storedClientId = stored.clientId ?? undefined;
+    const storedClientSecret = stored.clientId
+      ? this.config.get<string>("KEYCLOAK_WEB_CLIENT_SECRET", "")
+      : undefined;
+    const tokens = await this.tokenService.rotateRefreshToken(
+      rawRefreshToken,
+      storedClientId,
+      storedClientSecret,
+    );
 
     // Revoke old token, store new one
     await this.refreshTokenRepo.update(stored.id, { revokedAt: new Date() });
@@ -356,6 +379,7 @@ export class AuthService {
       tokens.refreshExpiresIn,
       ip,
       userAgent,
+      stored.clientId ?? undefined,
     );
 
     return { ...tokens, user: this.safeUser(stored.user) };
@@ -449,6 +473,7 @@ export class AuthService {
     refreshExpiresIn: number,
     ip?: string,
     userAgent?: string,
+    clientId?: string,
   ): Promise<void> {
     const record = this.refreshTokenRepo.create({
       userId,
@@ -456,6 +481,7 @@ export class AuthService {
       expiresAt: new Date(Date.now() + refreshExpiresIn * 1000),
       ipAddress: ip ?? null,
       userAgent: userAgent ?? null,
+      clientId: clientId ?? null,
     });
     await this.refreshTokenRepo.save(record);
   }
