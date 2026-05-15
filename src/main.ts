@@ -3,7 +3,9 @@ import { ValidationPipe, VersioningType } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
+import helmet from "helmet";
 import { AppModule } from "./app.module";
+import { buildHelmetOptions } from "./common/config/helmet.config";
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
@@ -13,9 +15,13 @@ async function bootstrap(): Promise<void> {
   app.getHttpAdapter().getInstance().set("trust proxy", 1);
 
   const config = app.get(ConfigService);
+  const isDev = config.get<string>("NODE_ENV") !== "production";
   const port = config.get<number>("PORT", 3001);
 
   app.use(cookieParser());
+
+  // Helmet: gắn security headers cho tất cả response
+  app.use(helmet(buildHelmetOptions(isDev)));
 
   // Global prefix
   app.setGlobalPrefix("api");
@@ -37,7 +43,7 @@ async function bootstrap(): Promise<void> {
   app.enableCors({ origin: false });
 
   // Swagger (dev only)
-  if (config.get<string>("NODE_ENV") !== "production") {
+  if (isDev) {
     const doc = new DocumentBuilder()
       .setTitle("Auth Service")
       .setVersion("1.0")

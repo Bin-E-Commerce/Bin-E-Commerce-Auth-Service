@@ -1,7 +1,6 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
-import { ThrottlerModule } from "@nestjs/throttler";
 import { TerminusModule } from "@nestjs/terminus";
 import { RedisModule } from "./database/redis/redis.module";
 import { KafkaModule } from "./kafka/kafka.module";
@@ -37,9 +36,6 @@ import { HealthModule } from "./modules/health/health.module";
         logging: config.get<string>("NODE_ENV") === "development",
       }),
     }),
-
-    // Rate limiting
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]), // Cấu hình rate limiting: tối đa 100 request mỗi phút cho mỗi IP
 
     // Health checks
     TerminusModule,
