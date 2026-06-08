@@ -3,18 +3,22 @@ import {
   NotFoundException,
   UnprocessableEntityException,
   ForbiddenException,
+  BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, Not } from "typeorm";
+import { Repository, Not, IsNull } from "typeorm";
+import { createHash } from "crypto";
 
 import { User } from "../../../database/entities/user.entity";
 import { UserAddress } from "../../../database/entities/user-address.entity";
+import { RefreshToken } from "../../../database/entities/refresh-token.entity";
 import { UserRole } from "@common/enums/user-role.enum";
 import { UserStatus } from "@common/enums/user-status.enum";
 import { KeycloakAdminService } from "../../auth/services/keycloak-admin.service";
 import { UpdateProfileDto } from "../dto/update-profile.dto";
 import { CreateAddressDto } from "../dto/create-address.dto";
 import { UpdateAddressDto } from "../dto/update-address.dto";
+import { SessionResponseDto } from "../dto/session-response.dto";
 
 const MAX_ADDRESSES = 5;
 
@@ -25,13 +29,29 @@ export class UserService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(UserAddress)
     private readonly addressRepo: Repository<UserAddress>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshTokenRepo: Repository<RefreshToken>,
     private readonly keycloakAdmin: KeycloakAdminService,
   ) {}
+
+  // ─────────────────────────────── HELPERS ──────────────────────────────────
+
+  // x-user-id từ JWT gateway = Keycloak sub (keycloakId), KHÁC với user.id (PostgreSQL UUID).
+  // Hàm này resolve keycloakId → local user.id để dùng trong các query trên bảng liên quan.
+  private async resolveUserId(keycloakId: string): Promise<string> {
+    const user = await this.userRepo.findOne({
+      where: { keycloakId },
+      select: ["id"],
+    });
+    if (!user) throw new NotFoundException("User not found");
+    return user.id;
+  }
 
   // ─────────────────────────────── PROFILE ─────────────────────────────────
 
   async getProfile(userId: string): Promise<User> {
-    const user = await this.userRepo.findOne({ where: { id: userId } });
+    // userId = keycloakId (Keycloak sub từ JWT), query bằng keycloakId thay vì id local
+    const user = await this.userRepo.findOne({ where: { keycloakId: userId } });
     if (!user) throw new NotFoundException("User not found");
     return user;
   }
@@ -47,8 +67,9 @@ export class UserService {
   // ─────────────────────────────── ADDRESSES ───────────────────────────────
 
   async listAddresses(userId: string): Promise<UserAddress[]> {
+    const localId = await this.resolveUserId(userId);
     return this.addressRepo.find({
-      where: { userId },
+      where: { userId: localId },
       order: { isDefault: "DESC", createdAt: "ASC" },
     });
   }
@@ -57,7 +78,8 @@ export class UserService {
     userId: string,
     dto: CreateAddressDto,
   ): Promise<UserAddress> {
-    const count = await this.addressRepo.count({ where: { userId } });
+    const localId = await this.resolveUserId(userId);
+    const count = await this.addressRepo.count({ where: { userId: localId } });
     // Giới hạn số lượng địa chỉ mà một người dùng có thể tạo để tránh spam và quản lý dễ dàng hơn. 
     // Nếu đã đạt giới hạn, trả về lỗi 422 Unprocessable Entity.
     if (count >= MAX_ADDRESSES) {
@@ -71,12 +93,12 @@ export class UserService {
     // để duy trì tính nhất quán, tức là chỉ có một địa chỉ mặc định duy nhất cho mỗi người dùng.
     if (dto.isDefault) {
       await this.addressRepo.update(
-        { userId, isDefault: true },
+        { userId: localId, isDefault: true },
         { isDefault: false },
       );
     }
 
-    const address = this.addressRepo.create({ ...dto, userId });
+    const address = this.addressRepo.create({ ...dto, userId: localId });
     return this.addressRepo.save(address);
   }
 
@@ -85,14 +107,15 @@ export class UserService {
     addressId: string,
     dto: UpdateAddressDto,
   ): Promise<UserAddress> {
+    const localId = await this.resolveUserId(userId);
     const address = await this.addressRepo.findOne({
-      where: { id: addressId, userId },
+      where: { id: addressId, userId: localId },
     });
     if (!address) throw new NotFoundException("Address not found");
 
     if (dto.isDefault === true && !address.isDefault) {
       await this.addressRepo.update(
-        { userId, isDefault: true },
+        { userId: localId, isDefault: true },
         { isDefault: false },
       );
     }
@@ -102,8 +125,9 @@ export class UserService {
   }
 
   async deleteAddress(userId: string, addressId: string): Promise<void> {
+    const localId = await this.resolveUserId(userId);
     const address = await this.addressRepo.findOne({
-      where: { id: addressId, userId },
+      where: { id: addressId, userId: localId },
     });
     if (!address) throw new NotFoundException("Address not found");
 
@@ -112,13 +136,81 @@ export class UserService {
     // Auto-assign default to newest remaining address if deleted one was default
     if (address.isDefault) {
       const newest = await this.addressRepo.findOne({
-        where: { userId },
+        where: { userId: localId },
         order: { createdAt: "DESC" },
       });
       if (newest) {
         await this.addressRepo.update(newest.id, { isDefault: true });
       }
     }
+  }
+
+  // ─────────────────────────────── SESSIONS ────────────────────────────────
+
+  private hashToken(raw: string): string {
+    return createHash("sha256").update(raw).digest("hex");
+  }
+
+  async getSessions(
+    userId: string,
+    currentSessionId?: string,
+  ): Promise<SessionResponseDto[]> {
+    const localId = await this.resolveUserId(userId);
+    const now = new Date();
+    const tokens = await this.refreshTokenRepo.find({
+      where: { userId: localId, revokedAt: IsNull() },
+      order: { issuedAt: "DESC" },
+    });
+
+    return tokens
+      .filter((t) => t.expiresAt > now)
+      .map((t) => ({
+        id: t.id,
+        issuedAt: t.issuedAt,
+        expiresAt: t.expiresAt,
+        ipAddress: t.ipAddress,
+        userAgent: t.userAgent,
+        clientId: t.clientId,
+        isCurrent: currentSessionId ? t.id === currentSessionId : false,
+      }));
+  }
+
+  async revokeSession(
+    userId: string,
+    sessionId: string,
+    currentSessionId?: string,
+  ): Promise<void> {
+    const localId = await this.resolveUserId(userId);
+    const session = await this.refreshTokenRepo.findOne({
+      where: { id: sessionId, userId: localId, revokedAt: IsNull() },
+    });
+    if (!session) throw new NotFoundException("Session not found");
+
+    if (currentSessionId && session.id === currentSessionId) {
+      throw new BadRequestException(
+        "Cannot revoke current session. Use logout instead.",
+      );
+    }
+
+    session.revokedAt = new Date();
+    await this.refreshTokenRepo.save(session);
+  }
+
+  async revokeOtherSessions(
+    userId: string,
+    currentSessionId: string,
+  ): Promise<number> {
+    const localId = await this.resolveUserId(userId);
+    const result = await this.refreshTokenRepo
+      .createQueryBuilder()
+      .update(RefreshToken)
+      .set({ revokedAt: new Date() })
+      .where(
+        "userId = :userId AND revokedAt IS NULL AND id != :currentSessionId",
+        { userId: localId, currentSessionId },
+      )
+      .execute();
+    return result.affected ?? 0;
   }
 
   // ─────────────────────────────── ADMIN ───────────────────────────────────

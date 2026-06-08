@@ -149,7 +149,7 @@ export class AuthService {
 
     // Lưu refresh token vào DB để quản lý phiên đăng nhập,
     // hỗ trợ revoke khi cần thiết, và phục vụ cho các tính năng bảo mật như phát hiện token bị lộ.
-    await this.saveRefreshToken(
+    const session = await this.saveRefreshToken(
       user.id,
       tokens.refreshToken,
       tokens.refreshExpiresIn,
@@ -157,7 +157,7 @@ export class AuthService {
       userAgent,
     );
 
-    return { ...tokens, user: this.safeUser(user) };
+    return { ...tokens, sessionId: session.id, user: this.safeUser(user) };
   }
 
   // ─────────────────────────────── LOGIN ───────────────────────────────────
@@ -180,7 +180,7 @@ export class AuthService {
     // Cập nhật lastLoginAt và lưu refresh token vào DB local để quản lý phiên đăng nhập,
     // hỗ trợ revoke khi cần thiết, và phục vụ cho các tính năng bảo mật như phát hiện token bị lộ.
     await this.userRepo.update(user.id, { lastLoginAt: new Date() });
-    await this.saveRefreshToken(
+    const session = await this.saveRefreshToken(
       user.id,
       tokens.refreshToken,
       tokens.refreshExpiresIn,
@@ -188,7 +188,7 @@ export class AuthService {
       userAgent,
     );
 
-    return { ...tokens, user: this.safeUser(user) };
+    return { ...tokens, sessionId: session.id, user: this.safeUser(user) };
   }
 
   // ─────────────────────────────── SOCIAL ──────────────────────────────────
@@ -216,7 +216,7 @@ export class AuthService {
       "KEYCLOAK_WEB_CLIENT_ID",
       "web-client",
     );
-    const redirectUri = `${this.config.get<string>("FRONTEND_URL", "http://localhost:5173")}/auth/callback`;
+    const redirectUri = this.getSocialCallbackUrl();
 
     const authUrl =
       `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth` +
@@ -248,7 +248,7 @@ export class AuthService {
     }
     this.socialStateStore.delete(dto.state);
 
-    const redirectUri = `${this.config.get<string>("FRONTEND_URL", "http://localhost:5173")}/auth/callback`;
+    const redirectUri = this.getSocialCallbackUrl();
     const webClientId = this.config.get<string>(
       "KEYCLOAK_WEB_CLIENT_ID",
       "web-client",
@@ -305,7 +305,7 @@ export class AuthService {
       throw new UnauthorizedException("Account is inactive or banned");
 
     await this.userRepo.update(user.id, { lastLoginAt: new Date() });
-    await this.saveRefreshToken(
+    const session = await this.saveRefreshToken(
       user.id,
       tokens.refreshToken,
       tokens.refreshExpiresIn,
@@ -318,6 +318,7 @@ export class AuthService {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       expiresIn: tokens.expiresIn,
+      sessionId: session.id,
       user: this.safeUser(user),
     };
   }
@@ -333,6 +334,7 @@ export class AuthService {
     refreshToken: string;
     expiresIn: number;
     refreshExpiresIn: number;
+    sessionId: string;
     user: Partial<User>;
   }> {
     const hash = this.tokenService.hashToken(rawRefreshToken);
@@ -373,7 +375,7 @@ export class AuthService {
 
     // Revoke old token, store new one
     await this.refreshTokenRepo.update(stored.id, { revokedAt: new Date() });
-    await this.saveRefreshToken(
+    const newSession = await this.saveRefreshToken(
       stored.userId,
       tokens.refreshToken,
       tokens.refreshExpiresIn,
@@ -382,7 +384,7 @@ export class AuthService {
       stored.clientId ?? undefined,
     );
 
-    return { ...tokens, user: this.safeUser(stored.user) };
+    return { ...tokens, sessionId: newSession.id, user: this.safeUser(stored.user) };
   }
 
   // ─────────────────────────────── LOGOUT ──────────────────────────────────
@@ -474,7 +476,7 @@ export class AuthService {
     ip?: string,
     userAgent?: string,
     clientId?: string,
-  ): Promise<void> {
+  ): Promise<RefreshToken> {
     const record = this.refreshTokenRepo.create({
       userId,
       tokenHash: this.tokenService.hashToken(rawToken),
@@ -483,11 +485,21 @@ export class AuthService {
       userAgent: userAgent ?? null,
       clientId: clientId ?? null,
     });
-    await this.refreshTokenRepo.save(record);
+    return this.refreshTokenRepo.save(record);
   }
 
   private safeUser(user: User): Partial<User> {
     const { id, email, name, phone, role, status, avatarUrl, createdAt } = user;
     return { id, email, name, phone, role, status, avatarUrl, createdAt };
+  }
+
+  private getSocialCallbackUrl(): string {
+    const configured = this.config.get<string>("SOCIAL_AUTH_CALLBACK_URL");
+    if (configured) return configured;
+
+    const frontendUrl = this.config
+      .get<string>("FRONTEND_URL", "http://localhost:5173")
+      .replace(/\/+$/, "");
+    return `${frontendUrl}/callback`;
   }
 }

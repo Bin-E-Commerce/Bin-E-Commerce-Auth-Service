@@ -4,5 +4,6 @@ export class SessionResponseDto {
   expiresAt: Date;
   ipAddress: string | null;
   userAgent: string | null;
+  clientId: string | null;
   isCurrent: boolean;
 }

@@ -70,4 +70,36 @@ export class UserController {
     await this.userService.deleteAddress(userId, id);
     return { data: null, message: "Address deleted", statusCode: 200 };
   }
+
+  // ──────────────────────────────── SESSIONS ────────────────────────────────
+
+  @Get("me/sessions")
+  async getSessions(
+    @Headers("x-user-id") userId: string,
+    @Headers("x-session-id") currentSessionId?: string,
+  ) {
+    const sessions = await this.userService.getSessions(userId, currentSessionId);
+    return { data: sessions, message: "Sessions retrieved", statusCode: 200 };
+  }
+
+  @Delete("me/sessions")
+  @HttpCode(HttpStatus.OK)
+  async revokeOtherSessions(
+    @Headers("x-user-id") userId: string,
+    @Headers("x-session-id") currentSessionId: string,
+  ) {
+    const revokedCount = await this.userService.revokeOtherSessions(userId, currentSessionId);
+    return { data: { revokedCount }, message: "Other sessions revoked", statusCode: 200 };
+  }
+
+  @Delete("me/sessions/:id")
+  @HttpCode(HttpStatus.OK)
+  async revokeSession(
+    @Headers("x-user-id") userId: string,
+    @Headers("x-session-id") currentSessionId: string,
+    @Param("id", ParseUUIDPipe) sessionId: string,
+  ) {
+    await this.userService.revokeSession(userId, sessionId, currentSessionId);
+    return { data: null, message: "Session revoked", statusCode: 200 };
+  }
 }

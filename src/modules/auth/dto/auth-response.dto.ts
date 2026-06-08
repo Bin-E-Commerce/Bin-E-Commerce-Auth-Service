@@ -4,5 +4,6 @@ export interface AuthResponse {
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
+  sessionId: string;
   user: Partial<User>;
 }
