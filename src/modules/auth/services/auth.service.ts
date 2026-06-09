@@ -4,9 +4,10 @@ import {
   UnauthorizedException,
   ConflictException,
   NotFoundException,
+  BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { IsNull, Repository } from "typeorm";
 import * as jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import { ConfigService } from "@nestjs/config";
@@ -26,7 +27,9 @@ import { LoginDto } from "../dto/login.dto";
 import { SocialCallbackDto } from "../dto/social-callback.dto";
 import { ForgotPasswordDto } from "../dto/forgot-password.dto";
 import { ResetPasswordDto } from "../dto/reset-password.dto";
+import { ChangePasswordDto } from "../dto/change-password.dto";
 import { AuthResponse } from "../dto/auth-response.dto";
+import { SessionResponseDto } from "../../users/dto/session-response.dto";
 
 @Injectable()
 export class AuthService {
@@ -155,6 +158,8 @@ export class AuthService {
       tokens.refreshExpiresIn,
       ip,
       userAgent,
+      undefined,
+      "password",
     );
 
     return { ...tokens, sessionId: session.id, user: this.safeUser(user) };
@@ -186,6 +191,8 @@ export class AuthService {
       tokens.refreshExpiresIn,
       ip,
       userAgent,
+      undefined,
+      "password",
     );
 
     return { ...tokens, sessionId: session.id, user: this.safeUser(user) };
@@ -312,12 +319,14 @@ export class AuthService {
       ip,
       userAgent,
       webClientId,
+      provider,
     );
 
     return {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       expiresIn: tokens.expiresIn,
+      refreshExpiresIn: tokens.refreshExpiresIn,
       sessionId: session.id,
       user: this.safeUser(user),
     };
@@ -346,14 +355,12 @@ export class AuthService {
     });
 
     // Nếu token không tồn tại, đã bị thu hồi, hoặc đã hết hạn, sẽ ném lỗi UnauthorizedException.
-    // Đồng thời, nếu token đã bị thu hồi (nghi ngờ bị lộ)
-    // Sẽ thực hiện revoke tất cả các token khác của user đó để bảo vệ tài khoản.
     if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
-      // Nếu token đã bị thu hồi, sẽ thu hồi tất cả các token khác của user đó để bảo vệ tài khoản, phòng trường hợp token bị lộ.
-      if (stored?.revokedAt) {
+      // Chỉ coi refresh token đã xoay vòng bị dùng lại là dấu hiệu bị lộ; token bị logout thủ công chỉ cần từ chối riêng phiên đó.
+      if (this.shouldRevokeAllSessionsOnRefreshReuse(stored)) {
         await this.refreshTokenRepo.update(
           { userId: stored.userId },
-          { revokedAt: new Date() },
+          { revokedAt: new Date(), revokedReason: "TOKEN_REUSE_DETECTED" },
         );
       }
       throw new UnauthorizedException("Refresh token is invalid or expired");
@@ -374,7 +381,10 @@ export class AuthService {
     );
 
     // Revoke old token, store new one
-    await this.refreshTokenRepo.update(stored.id, { revokedAt: new Date() });
+    await this.refreshTokenRepo.update(stored.id, {
+      revokedAt: new Date(),
+      revokedReason: "TOKEN_ROTATED",
+    });
     const newSession = await this.saveRefreshToken(
       stored.userId,
       tokens.refreshToken,
@@ -382,9 +392,14 @@ export class AuthService {
       ip,
       userAgent,
       stored.clientId ?? undefined,
+      stored.loginMethod ?? undefined,
     );
 
-    return { ...tokens, sessionId: newSession.id, user: this.safeUser(stored.user) };
+    return {
+      ...tokens,
+      sessionId: newSession.id,
+      user: this.safeUser(stored.user),
+    };
   }
 
   // ─────────────────────────────── LOGOUT ──────────────────────────────────
@@ -393,7 +408,7 @@ export class AuthService {
     const hash = this.tokenService.hashToken(rawRefreshToken);
     await this.refreshTokenRepo.update(
       { tokenHash: hash },
-      { revokedAt: new Date() },
+      { revokedAt: new Date(), revokedReason: "USER_LOGOUT" },
     );
     try {
       await this.tokenService.revokeToken(rawRefreshToken);
@@ -461,13 +476,187 @@ export class AuthService {
     // Thu hồi toàn bộ phiên đăng nhập hiện tại của user để buộc đăng nhập lại
     await this.refreshTokenRepo.update(
       { userId: user.id },
-      { revokedAt: new Date() },
+      { revokedAt: new Date(), revokedReason: "PASSWORD_RESET" },
     );
 
     return { message: "Password reset successful. Please log in again." };
   }
 
   // ─────────────────────────────── HELPERS ─────────────────────────────────
+
+  // Đổi mật khẩu cho người dùng đang đăng nhập, tạo phiên mới và thu hồi các phiên cũ để tránh refresh trang bị logout.
+  async changePassword(
+    keycloakId: string,
+    dto: ChangePasswordDto,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<AuthResponse> {
+    const user = await this.userRepo.findOne({ where: { keycloakId } });
+    if (!user) throw new NotFoundException("User not found");
+    if (user.status !== UserStatus.ACTIVE)
+      throw new UnauthorizedException("Account is inactive or banned");
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException(
+        "New password must be different from current password",
+      );
+    }
+
+    // Keycloak không trả hash mật khẩu, nên xác thực mật khẩu hiện tại bằng password grant rồi bỏ token nhận được.
+    let verificationTokens: TokenPair;
+    try {
+      verificationTokens = await this.tokenService.issueTokenPair(
+        user.email,
+        dto.currentPassword,
+      );
+    } catch {
+      throw new BadRequestException("Current password is incorrect");
+    }
+
+    // Token dùng để kiểm tra mật khẩu cũ không được lưu vào DB, nên thu hồi ngay để không tạo phiên Keycloak thừa.
+    try {
+      await this.tokenService.revokeToken(verificationTokens.refreshToken);
+    } catch {
+      this.logger.warn("Failed to revoke password verification token");
+    }
+
+    await this.keycloakAdmin.resetUserPassword(
+      user.keycloakId,
+      dto.newPassword,
+    );
+
+    const tokens = await this.tokenService.issueTokenPair(
+      user.email,
+      dto.newPassword,
+    );
+    const newSession = await this.saveRefreshToken(
+      user.id,
+      tokens.refreshToken,
+      tokens.refreshExpiresIn,
+      ip,
+      userAgent,
+      undefined,
+      "password",
+    );
+
+    // Sau khi đổi mật khẩu, các phiên khác bị thu hồi để giảm rủi ro tài khoản còn mở trên thiết bị lạ.
+    const revokeQuery = this.refreshTokenRepo
+      .createQueryBuilder()
+      .update(RefreshToken)
+      .set({ revokedAt: new Date(), revokedReason: "PASSWORD_CHANGED" })
+      .where("userId = :userId AND revokedAt IS NULL", { userId: user.id })
+      .andWhere("id != :newSessionId", { newSessionId: newSession.id });
+
+    await revokeQuery.execute();
+
+    return { ...tokens, sessionId: newSession.id, user: this.safeUser(user) };
+  }
+
+  // Lấy các phiên còn hoạt động của user hiện tại, ưu tiên chủ phiên từ refresh token cookie để tránh lệch khi access token/header đã xoay vòng.
+  async listSessions(
+    keycloakId: string,
+    currentSessionId?: string,
+    rawRefreshToken?: string,
+    currentUserAgent?: string | string[],
+  ): Promise<SessionResponseDto[]> {
+    const { user, currentSession } = await this.resolveSessionOwner(
+      keycloakId,
+      rawRefreshToken,
+    );
+
+    const now = new Date();
+    const sessions = await this.refreshTokenRepo.find({
+      where: { userId: user.id, revokedAt: IsNull() },
+      order: { issuedAt: "DESC" },
+    });
+
+    const effectiveCurrentSessionId = currentSession?.id ?? currentSessionId;
+    const normalizedUserAgent = Array.isArray(currentUserAgent)
+      ? currentUserAgent[0]
+      : currentUserAgent;
+
+    // Khi xác định được phiên hiện tại, cập nhật lastActiveAt để UI phản ánh hoạt động mới nhất.
+    if (effectiveCurrentSessionId) {
+      const currentSession = sessions.find(
+        (session) => session.id === effectiveCurrentSessionId,
+      );
+      if (currentSession) currentSession.lastActiveAt = new Date();
+      await this.refreshTokenRepo.update(effectiveCurrentSessionId, {
+        lastActiveAt: currentSession?.lastActiveAt ?? new Date(),
+      });
+    }
+
+    return sessions
+      .filter((session) => session.expiresAt > now)
+      .map((session) =>
+        this.toSessionResponse(
+          session,
+          effectiveCurrentSessionId,
+          normalizedUserAgent,
+        ),
+      );
+  }
+
+  // Thu hồi một phiên cụ thể nếu phiên đó thuộc về user hiện tại.
+  async revokeSessionById(
+    keycloakId: string,
+    sessionId: string,
+    rawRefreshToken?: string,
+  ): Promise<void> {
+    const { user } = await this.resolveSessionOwner(keycloakId, rawRefreshToken);
+
+    const session = await this.refreshTokenRepo.findOne({
+      where: { id: sessionId, userId: user.id, revokedAt: IsNull() },
+    });
+    if (!session) throw new NotFoundException("Session not found");
+
+    session.revokedAt = new Date();
+    session.revokedReason = "USER_REVOKED";
+    await this.refreshTokenRepo.save(session);
+  }
+
+  // Thu hồi mọi phiên khác và giữ nguyên phiên hiện tại lấy từ cookie nếu có.
+  async revokeOtherSessions(
+    keycloakId: string,
+    currentSessionId?: string,
+    rawRefreshToken?: string,
+  ): Promise<number> {
+    const { user, currentSession } = await this.resolveSessionOwner(
+      keycloakId,
+      rawRefreshToken,
+    );
+    const effectiveCurrentSessionId = currentSession?.id ?? currentSessionId;
+    if (!effectiveCurrentSessionId) {
+      throw new UnauthorizedException("Missing session context");
+    }
+
+    const result = await this.refreshTokenRepo
+      .createQueryBuilder()
+      .update(RefreshToken)
+      .set({ revokedAt: new Date(), revokedReason: "USER_REVOKED" })
+      .where(
+        "userId = :userId AND revokedAt IS NULL AND id != :currentSessionId",
+        { userId: user.id, currentSessionId: effectiveCurrentSessionId },
+      )
+      .execute();
+    return result.affected ?? 0;
+  }
+
+  // Thu hồi toàn bộ phiên của user hiện tại, bao gồm cả phiên đang dùng.
+  async revokeAllSessions(
+    keycloakId: string,
+    rawRefreshToken?: string,
+  ): Promise<number> {
+    const { user } = await this.resolveSessionOwner(keycloakId, rawRefreshToken);
+
+    const result = await this.refreshTokenRepo
+      .createQueryBuilder()
+      .update(RefreshToken)
+      .set({ revokedAt: new Date(), revokedReason: "USER_REVOKED" })
+      .where("userId = :userId AND revokedAt IS NULL", { userId: user.id })
+      .execute();
+    return result.affected ?? 0;
+  }
 
   private async saveRefreshToken(
     userId: string,
@@ -476,16 +665,137 @@ export class AuthService {
     ip?: string,
     userAgent?: string,
     clientId?: string,
+    loginMethod?: string,
   ): Promise<RefreshToken> {
+    const metadata = this.parseSessionMetadata(userAgent, loginMethod, clientId);
     const record = this.refreshTokenRepo.create({
       userId,
       tokenHash: this.tokenService.hashToken(rawToken),
       expiresAt: new Date(Date.now() + refreshExpiresIn * 1000),
+      lastActiveAt: new Date(),
       ipAddress: ip ?? null,
       userAgent: userAgent ?? null,
       clientId: clientId ?? null,
+      ...metadata,
     });
     return this.refreshTokenRepo.save(record);
+  }
+
+  // Phân biệt token reuse thật với phiên bị người dùng thu hồi, tránh việc thiết bị đã bị đá làm logout ngược lại thiết bị hiện tại.
+  private shouldRevokeAllSessionsOnRefreshReuse(
+    stored: RefreshToken | null,
+  ): stored is RefreshToken {
+    return Boolean(stored?.revokedAt && stored.revokedReason === "TOKEN_ROTATED");
+  }
+
+  // Tách thông tin thiết bị từ user-agent để lưu sẵn vào session, giúp UI không phải đoán toàn bộ ở client.
+  private parseSessionMetadata(
+    userAgent?: string,
+    loginMethod?: string,
+    clientId?: string,
+  ): Pick<
+    RefreshToken,
+    "deviceName" | "deviceType" | "browser" | "os" | "loginMethod" | "location"
+  > {
+    const ua = userAgent ?? "";
+    const deviceType = /tablet|ipad|playbook|silk/i.test(ua)
+      ? "tablet"
+      : /mobile|android|iphone|ipod|blackberry|opera mini|iemobile/i.test(ua)
+        ? "mobile"
+        : "desktop";
+    const os = this.detectOs(ua);
+    const browser = this.detectBrowser(ua);
+
+    return {
+      deviceName: `${os} - ${browser}`,
+      deviceType,
+      browser,
+      os,
+      loginMethod: loginMethod ?? (clientId ? "google" : "password"),
+      location: null,
+    };
+  }
+
+  // Nhận diện hệ điều hành phổ biến từ user-agent.
+  private detectOs(userAgent: string): string {
+    if (/windows nt 10/i.test(userAgent)) return "Windows 10/11";
+    if (/windows/i.test(userAgent)) return "Windows";
+    if (/mac os x/i.test(userAgent)) return "macOS";
+    if (/iphone/i.test(userAgent)) return "iPhone";
+    if (/ipad/i.test(userAgent)) return "iPad";
+    if (/android/i.test(userAgent)) return "Android";
+    if (/linux/i.test(userAgent)) return "Linux";
+    return "Không rõ";
+  }
+
+  // Nhận diện trình duyệt phổ biến từ user-agent.
+  private detectBrowser(userAgent: string): string {
+    if (/edg\//i.test(userAgent)) return "Microsoft Edge";
+    if (/opr\//i.test(userAgent) || /opera/i.test(userAgent)) return "Opera";
+    if (/chrome\/[\d.]+/i.test(userAgent) && !/chromium/i.test(userAgent))
+      return "Chrome";
+    if (/firefox\/[\d.]+/i.test(userAgent)) return "Firefox";
+    if (/safari\/[\d.]+/i.test(userAgent) && !/chrome/i.test(userAgent))
+      return "Safari";
+    return "Không rõ";
+  }
+
+  // Chuyển bản ghi refresh token thành DTO session dùng chung cho API và UI.
+  private toSessionResponse(
+    session: RefreshToken,
+    currentSessionId?: string,
+    currentUserAgent?: string,
+  ): SessionResponseDto {
+    const isCurrent = currentSessionId ? session.id === currentSessionId : false;
+    const fallbackMetadata =
+      isCurrent && (!session.browser || !session.os) && currentUserAgent
+        ? this.parseSessionMetadata(
+            currentUserAgent,
+            session.loginMethod ?? undefined,
+            session.clientId ?? undefined,
+          )
+        : null;
+
+    return {
+      id: session.id,
+      deviceName:
+        session.deviceName ?? fallbackMetadata?.deviceName ?? "Thiết bị không rõ",
+      deviceType: session.deviceType ?? fallbackMetadata?.deviceType ?? "desktop",
+      browser: session.browser ?? fallbackMetadata?.browser ?? "Không rõ",
+      os: session.os ?? fallbackMetadata?.os ?? "Không rõ",
+      loginMethod: session.loginMethod ?? (session.clientId ? "google" : "password"),
+      ipAddress: session.ipAddress,
+      location: session.location,
+      userAgent: session.userAgent,
+      issuedAt: session.issuedAt,
+      lastActiveAt: session.lastActiveAt,
+      expiresAt: session.expiresAt,
+      clientId: session.clientId,
+      isCurrent,
+    };
+  }
+
+  // Xác định local user đang thao tác bằng refresh token trước, vì đây là bản ghi phiên thật đang nằm trong cookie trình duyệt.
+  private async resolveSessionOwner(
+    keycloakId: string,
+    rawRefreshToken?: string,
+  ): Promise<{ user: User; currentSession?: RefreshToken }> {
+    if (rawRefreshToken) {
+      const tokenHash = this.tokenService.hashToken(rawRefreshToken);
+      const currentSession = await this.refreshTokenRepo.findOne({
+        where: { tokenHash, revokedAt: IsNull() },
+        relations: ["user"],
+      });
+
+      // Cookie hợp lệ sẽ quyết định user/session hiện tại, tránh lỗi social login và password login trỏ vào keycloakId khác nhau.
+      if (currentSession && currentSession.expiresAt > new Date()) {
+        return { user: currentSession.user, currentSession };
+      }
+    }
+
+    const user = await this.userRepo.findOne({ where: { keycloakId } });
+    if (!user) throw new NotFoundException("User not found");
+    return { user };
   }
 
   private safeUser(user: User): Partial<User> {

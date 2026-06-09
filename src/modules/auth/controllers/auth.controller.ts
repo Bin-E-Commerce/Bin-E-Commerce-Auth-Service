@@ -4,6 +4,8 @@ import {
   Get,
   Body,
   Param,
+  Headers,
+  ParseUUIDPipe,
   Req,
   Res,
   HttpCode,
@@ -20,6 +22,7 @@ import { RefreshDto } from "../dto/refresh.dto";
 import { SocialCallbackDto } from "../dto/social-callback.dto";
 import { ForgotPasswordDto } from "../dto/forgot-password.dto";
 import { ResetPasswordDto } from "../dto/reset-password.dto";
+import { ChangePasswordDto } from "../dto/change-password.dto";
 
 const REFRESH_COOKIE = "refresh_token";
 const COOKIE_OPTIONS = {
@@ -170,5 +173,119 @@ export class AuthController {
   async resetPassword(@Body() dto: ResetPasswordDto) {
     const result = await this.authService.resetPassword(dto);
     return { data: null, message: result.message, statusCode: 200 };
+  }
+
+  @Post("change-password")
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @Body() dto: ChangePasswordDto,
+    @Headers("x-user-id") userId: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // Header x-user-id được gateway gắn từ JWT, nên thiếu header này nghĩa là request không còn ngữ cảnh đăng nhập hợp lệ.
+    if (!userId) throw new UnauthorizedException("Missing user context");
+
+    const result = await this.authService.changePassword(
+      userId,
+      dto,
+      req.ip,
+      req.headers["user-agent"],
+    );
+    res.cookie(REFRESH_COOKIE, result.refreshToken, COOKIE_OPTIONS);
+    const { refreshToken: _, ...safeResult } = result;
+    return {
+      data: safeResult,
+      message: "Password changed successfully",
+      statusCode: 200,
+    };
+  }
+
+  @Get("sessions")
+  async getSessions(
+    @Headers("x-user-id") userId: string,
+    @Headers("x-session-id") currentSessionId?: string,
+    @Req() req?: Request,
+  ) {
+    // Danh sách phiên lấy theo refresh token cookie trước, header userId chỉ dùng làm ngữ cảnh xác thực dự phòng.
+    if (!userId) throw new UnauthorizedException("Missing user context");
+
+    const rawRefreshToken =
+      (req?.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    const sessions = await this.authService.listSessions(
+      userId,
+      currentSessionId,
+      rawRefreshToken,
+      req?.headers["user-agent"],
+    );
+    return { data: sessions, message: "Sessions retrieved", statusCode: 200 };
+  }
+
+  @Post("sessions/:sessionId/revoke")
+  @HttpCode(HttpStatus.OK)
+  async revokeSession(
+    @Headers("x-user-id") userId: string,
+    @Param("sessionId", ParseUUIDPipe) sessionId: string,
+    @Req() req: Request,
+  ) {
+    // Ưu tiên refresh token trong cookie để xác định đúng chủ phiên, vì header sessionId có thể cũ sau khi refresh token xoay vòng.
+    if (!userId) throw new UnauthorizedException("Missing user context");
+
+    const rawRefreshToken =
+      (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    await this.authService.revokeSessionById(
+      userId,
+      sessionId,
+      rawRefreshToken,
+    );
+    return { data: null, message: "Session revoked", statusCode: 200 };
+  }
+
+  @Post("sessions/logout-others")
+  @HttpCode(HttpStatus.OK)
+  async logoutOtherSessions(
+    @Headers("x-user-id") userId: string,
+    @Headers("x-session-id") currentSessionId: string | undefined,
+    @Req() req: Request,
+  ) {
+    // Cookie refresh token là nguồn chính để giữ lại đúng phiên hiện tại; header chỉ là phương án dự phòng.
+    if (!userId) throw new UnauthorizedException("Missing user context");
+
+    const rawRefreshToken =
+      (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    const revokedCount = await this.authService.revokeOtherSessions(
+      userId,
+      currentSessionId,
+      rawRefreshToken,
+    );
+    return {
+      data: { revokedCount },
+      message: "Other sessions revoked",
+      statusCode: 200,
+    };
+  }
+
+  @Post("sessions/logout-all")
+  @HttpCode(HttpStatus.OK)
+  async logoutAllSessions(
+    @Headers("x-user-id") userId: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // Logout tất cả phải thu hồi cả phiên hiện tại và xóa cookie refresh token trên trình duyệt.
+    if (!userId) throw new UnauthorizedException("Missing user context");
+
+    const rawRefreshToken =
+      (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    const revokedCount = await this.authService.revokeAllSessions(
+      userId,
+      rawRefreshToken,
+    );
+    res.clearCookie(REFRESH_COOKIE, { path: COOKIE_OPTIONS.path });
+    return {
+      data: { revokedCount },
+      message: "All sessions revoked",
+      statusCode: 200,
+    };
   }
 }

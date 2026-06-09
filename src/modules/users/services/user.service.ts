@@ -6,8 +6,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, Not, IsNull } from "typeorm";
-import { createHash } from "crypto";
+import { Repository, IsNull } from "typeorm";
 
 import { User } from "../../../database/entities/user.entity";
 import { UserAddress } from "../../../database/entities/user-address.entity";
@@ -147,10 +146,7 @@ export class UserService {
 
   // ─────────────────────────────── SESSIONS ────────────────────────────────
 
-  private hashToken(raw: string): string {
-    return createHash("sha256").update(raw).digest("hex");
-  }
-
+  // Trả về các phiên còn hoạt động của chính user hiện tại và đánh dấu phiên đang dùng bằng x-session-id.
   async getSessions(
     userId: string,
     currentSessionId?: string,
@@ -163,18 +159,11 @@ export class UserService {
     });
 
     return tokens
-      .filter((t) => t.expiresAt > now)
-      .map((t) => ({
-        id: t.id,
-        issuedAt: t.issuedAt,
-        expiresAt: t.expiresAt,
-        ipAddress: t.ipAddress,
-        userAgent: t.userAgent,
-        clientId: t.clientId,
-        isCurrent: currentSessionId ? t.id === currentSessionId : false,
-      }));
+      .filter((token) => token.expiresAt > now)
+      .map((token) => this.toSessionResponse(token, currentSessionId));
   }
 
+  // Thu hồi một phiên thuộc về user hiện tại; không cho chạm vào phiên của user khác.
   async revokeSession(
     userId: string,
     sessionId: string,
@@ -193,9 +182,11 @@ export class UserService {
     }
 
     session.revokedAt = new Date();
+    session.revokedReason = "USER_REVOKED";
     await this.refreshTokenRepo.save(session);
   }
 
+  // Thu hồi tất cả phiên khác, giữ lại phiên hiện tại để người dùng không bị đăng xuất khỏi thiết bị đang dùng.
   async revokeOtherSessions(
     userId: string,
     currentSessionId: string,
@@ -204,13 +195,36 @@ export class UserService {
     const result = await this.refreshTokenRepo
       .createQueryBuilder()
       .update(RefreshToken)
-      .set({ revokedAt: new Date() })
+      .set({ revokedAt: new Date(), revokedReason: "USER_REVOKED" })
       .where(
         "userId = :userId AND revokedAt IS NULL AND id != :currentSessionId",
         { userId: localId, currentSessionId },
       )
       .execute();
     return result.affected ?? 0;
+  }
+
+  // Chuyển bản ghi refresh token thành DTO thân thiện cho giao diện quản lý phiên.
+  private toSessionResponse(
+    token: RefreshToken,
+    currentSessionId?: string,
+  ): SessionResponseDto {
+    return {
+      id: token.id,
+      deviceName: token.deviceName ?? "Thiết bị không rõ",
+      deviceType: token.deviceType ?? "desktop",
+      browser: token.browser ?? "Không rõ",
+      os: token.os ?? "Không rõ",
+      loginMethod: token.loginMethod ?? (token.clientId ? "google" : "password"),
+      ipAddress: token.ipAddress,
+      location: token.location,
+      userAgent: token.userAgent,
+      issuedAt: token.issuedAt,
+      lastActiveAt: token.lastActiveAt,
+      expiresAt: token.expiresAt,
+      clientId: token.clientId,
+      isCurrent: currentSessionId ? token.id === currentSessionId : false,
+    };
   }
 
   // ─────────────────────────────── ADMIN ───────────────────────────────────
