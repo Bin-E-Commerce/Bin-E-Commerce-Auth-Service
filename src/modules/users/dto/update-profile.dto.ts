@@ -4,7 +4,6 @@ import {
   MinLength,
   MaxLength,
   Matches,
-  IsUrl,
 } from "class-validator";
 
 export class UpdateProfileDto {
@@ -18,9 +17,4 @@ export class UpdateProfileDto {
   @IsString()
   @Matches(/^0[3-9][0-9]{8}$/, { message: "Invalid Vietnamese phone number" })
   phone?: string;
-
-  @IsOptional()
-  @IsUrl()
-  @MaxLength(500)
-  avatarUrl?: string;
 }

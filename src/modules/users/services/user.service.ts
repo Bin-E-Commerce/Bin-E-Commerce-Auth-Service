@@ -55,12 +55,31 @@ export class UserService {
     return user;
   }
 
+  // Cập nhật các trường hồ sơ công khai; avatar được tách sang luồng nội bộ do Media Service xác nhận.
   async updateProfile(userId: string, dto: UpdateProfileDto): Promise<User> {
     const user = await this.getProfile(userId);
     if (dto.name !== undefined) user.name = dto.name;
     if (dto.phone !== undefined) user.phone = dto.phone;
-    if (dto.avatarUrl !== undefined) user.avatarUrl = dto.avatarUrl;
     return this.userRepo.save(user);
+  }
+
+  // Thay avatar hiện tại và trả lại URL cũ để Media Service xóa đúng asset sau khi transaction DB thành công.
+  async updateAvatar(
+    userId: string,
+    avatarUrl: string,
+  ): Promise<{
+    user: User;
+    oldAvatarUrl: string | null;
+  }> {
+    const user = await this.getProfile(userId);
+    const oldAvatarUrl = user.avatarUrl;
+    user.avatarUrl = avatarUrl;
+    const updatedUser = await this.userRepo.save(user);
+
+    return {
+      user: updatedUser,
+      oldAvatarUrl,
+    };
   }
 
   // ─────────────────────────────── ADDRESSES ───────────────────────────────
