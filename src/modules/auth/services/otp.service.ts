@@ -14,7 +14,7 @@ import { KafkaProducerService } from "../../../kafka/kafka-producer.service";
 import {
   NotificationEvents,
   OtpRequestedPayload,
-} from "@common/kafka/events/notification.events";
+} from "@common/kafka/events";
 
 @Injectable()
 export class OtpService {
