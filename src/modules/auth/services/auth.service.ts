@@ -11,6 +11,7 @@ import { IsNull, Repository } from "typeorm";
 import * as jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import { ConfigService } from "@nestjs/config";
+import { normalizeBusinessRoles } from "@common/auth";
 
 import { User } from "../../../database/entities/user.entity";
 import { RefreshToken } from "../../../database/entities/refresh-token.entity";
@@ -28,8 +29,9 @@ import { SocialCallbackDto } from "../dto/social-callback.dto";
 import { ForgotPasswordDto } from "../dto/forgot-password.dto";
 import { ResetPasswordDto } from "../dto/reset-password.dto";
 import { ChangePasswordDto } from "../dto/change-password.dto";
-import { AuthResponse } from "../dto/auth-response.dto";
+import { AuthResponse, AuthUserResponse } from "../dto/auth-response.dto";
 import { SessionResponseDto } from "../../users/dto/session-response.dto";
+import { AccessControlService } from "../../access-control/services/access-control.service";
 
 @Injectable()
 export class AuthService {
@@ -52,6 +54,7 @@ export class AuthService {
     private readonly keycloakAdmin: KeycloakAdminService,
     private readonly otpService: OtpService,
     private readonly tokenService: TokenService,
+    private readonly accessControlService: AccessControlService,
     private readonly config: ConfigService,
   ) {}
 
@@ -162,7 +165,11 @@ export class AuthService {
       "password",
     );
 
-    return { ...tokens, sessionId: session.id, user: this.safeUser(user) };
+    return {
+      ...tokens,
+      sessionId: session.id,
+      user: await this.toAuthUser(user, tokens.accessToken),
+    };
   }
 
   // ─────────────────────────────── LOGIN ───────────────────────────────────
@@ -195,7 +202,11 @@ export class AuthService {
       "password",
     );
 
-    return { ...tokens, sessionId: session.id, user: this.safeUser(user) };
+    return {
+      ...tokens,
+      sessionId: session.id,
+      user: await this.toAuthUser(user, tokens.accessToken),
+    };
   }
 
   // ─────────────────────────────── SOCIAL ──────────────────────────────────
@@ -328,7 +339,7 @@ export class AuthService {
       expiresIn: tokens.expiresIn,
       refreshExpiresIn: tokens.refreshExpiresIn,
       sessionId: session.id,
-      user: this.safeUser(user),
+      user: await this.toAuthUser(user, tokens.accessToken),
     };
   }
 
@@ -344,7 +355,7 @@ export class AuthService {
     expiresIn: number;
     refreshExpiresIn: number;
     sessionId: string;
-    user: Partial<User>;
+    user: AuthUserResponse;
   }> {
     const hash = this.tokenService.hashToken(rawRefreshToken);
 
@@ -398,8 +409,15 @@ export class AuthService {
     return {
       ...tokens,
       sessionId: newSession.id,
-      user: this.safeUser(stored.user),
+      user: await this.toAuthUser(stored.user, tokens.accessToken),
     };
+  }
+
+  // Trả viewer hiện tại từ access token context mà không xoay refresh token, phù hợp cho các màn hình chỉ cần đọc lại quyền/profile.
+  async getViewer(keycloakId: string, tokenRoles: string[] = []): Promise<AuthUserResponse> {
+    const user = await this.userRepo.findOne({ where: { keycloakId } });
+    if (!user) throw new NotFoundException("User not found");
+    return this.toAuthUser(user, undefined, tokenRoles);
   }
 
   // ─────────────────────────────── LOGOUT ──────────────────────────────────
@@ -549,7 +567,11 @@ export class AuthService {
 
     await revokeQuery.execute();
 
-    return { ...tokens, sessionId: newSession.id, user: this.safeUser(user) };
+    return {
+      ...tokens,
+      sessionId: newSession.id,
+      user: await this.toAuthUser(user, tokens.accessToken),
+    };
   }
 
   // Lấy các phiên còn hoạt động của user hiện tại, ưu tiên chủ phiên từ refresh token cookie để tránh lệch khi access token/header đã xoay vòng.
@@ -798,9 +820,65 @@ export class AuthService {
     return { user };
   }
 
-  private safeUser(user: User): Partial<User> {
+  // Chuyển user nội bộ sang viewer trả cho FE, kèm accessProfile để UI render theo dữ liệu backend.
+  // Hàm này async vì access profile được build từ DB role/permission/navigation và có Redis cache.
+  private async toAuthUser(
+    user: User,
+    accessToken?: string,
+    tokenRoles: string[] = [],
+  ): Promise<AuthUserResponse> {
     const { id, email, name, phone, role, status, avatarUrl, createdAt } = user;
-    return { id, email, name, phone, role, status, avatarUrl, createdAt };
+    const roles = this.mergeRoleCodes([
+      role,
+      ...tokenRoles,
+      ...this.extractTokenRoles(accessToken),
+    ]);
+    const access = await this.accessControlService.buildViewerAccess(
+      user,
+      roles,
+    );
+
+    return {
+      id,
+      email,
+      name,
+      phone,
+      role,
+      status,
+      avatarUrl,
+      createdAt,
+      roles,
+      permissions: access.permissions,
+      permissionGrants: access.permissionGrants,
+      accessProfile: access.accessProfile,
+    };
+  }
+
+  // Decode access token chỉ để lấy claim role đã được Keycloak ký; xác thực chữ ký nằm ở API Gateway/JWKS.
+  private extractTokenRoles(accessToken?: string): string[] {
+    if (!accessToken) return [];
+
+    const payload = jwt.decode(accessToken) as
+      | {
+          roles?: string[];
+          realm_access?: { roles?: string[] };
+          resource_access?: Record<string, { roles?: string[] }>;
+        }
+      | null;
+    if (!payload) return [];
+
+    return [
+      ...(payload.roles ?? []),
+      ...(payload.realm_access?.roles ?? []),
+      ...Object.values(payload.resource_access ?? {}).flatMap(
+        (access) => access.roles ?? [],
+      ),
+    ];
+  }
+
+  // Chuẩn hóa danh sách role, bỏ role kỹ thuật và bỏ CUSTOMER mặc định nếu user đã có role cao hơn.
+  private mergeRoleCodes(roles: string[]): string[] {
+    return normalizeBusinessRoles(roles);
   }
 
   private getSocialCallbackUrl(): string {

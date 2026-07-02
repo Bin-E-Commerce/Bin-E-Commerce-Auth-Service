@@ -111,6 +111,22 @@ export class AuthController {
     return { data: safeResult, message: "Token refreshed", statusCode: 200 };
   }
 
+  @Get("me")
+  async me(
+    @Headers("x-user-id") userId: string,
+    @Headers("x-user-roles") rolesHeader?: string,
+  ) {
+    if (!userId) throw new UnauthorizedException("Missing user context");
+
+    // /auth/me chỉ đọc viewer từ access token hiện tại, không rotate refresh token như /auth/refresh.
+    const roles = (rolesHeader ?? "")
+      .split(",")
+      .map((role) => role.trim())
+      .filter(Boolean);
+    const user = await this.authService.getViewer(userId, roles);
+    return { data: user, message: "Viewer retrieved", statusCode: 200 };
+  }
+
   @Post("logout")
   @HttpCode(HttpStatus.OK)
   async logout(

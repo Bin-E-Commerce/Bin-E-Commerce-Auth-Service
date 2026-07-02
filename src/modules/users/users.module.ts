@@ -11,11 +11,13 @@ import { AdminUserController } from "./controllers/admin-user.controller";
 import { InternalUserController } from "./controllers/internal-user.controller";
 import { InternalServiceGuard } from "./guards/internal-service.guard";
 import { AuthModule } from "../auth/auth.module";
+import { AccessControlModule } from "../access-control/access-control.module";
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, UserAddress, RefreshToken]),
     AuthModule, // imports KeycloakAdminService
+    AccessControlModule,
   ],
   controllers: [UserController, AdminUserController, InternalUserController],
   providers: [UserService, InternalServiceGuard],

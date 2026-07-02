@@ -15,15 +15,24 @@ import { UserService } from "../services/user.service";
 import { UpdateProfileDto } from "../dto/update-profile.dto";
 import { CreateAddressDto } from "../dto/create-address.dto";
 import { UpdateAddressDto } from "../dto/update-address.dto";
+import { User } from "../../../database/entities/user.entity";
+import { AccessControlService } from "../../access-control/services/access-control.service";
 
 @Controller("users")
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    private readonly accessControlService: AccessControlService,
+  ) {}
 
   @Get("me")
   async getProfile(@Headers("x-user-id") userId: string) {
     const user = await this.userService.getProfile(userId);
-    return { data: user, message: "Profile retrieved", statusCode: 200 };
+    return {
+      data: await this.toUserResponse(user),
+      message: "Profile retrieved",
+      statusCode: 200,
+    };
   }
 
   @Put("me")
@@ -32,7 +41,11 @@ export class UserController {
     @Body() dto: UpdateProfileDto,
   ) {
     const user = await this.userService.updateProfile(userId, dto);
-    return { data: user, message: "Profile updated", statusCode: 200 };
+    return {
+      data: await this.toUserResponse(user),
+      message: "Profile updated",
+      statusCode: 200,
+    };
   }
 
   @Get("me/addresses")
@@ -101,5 +114,43 @@ export class UserController {
   ) {
     await this.userService.revokeSession(userId, sessionId, currentSessionId);
     return { data: null, message: "Session revoked", statusCode: 200 };
+  }
+
+  // Chuẩn hóa response profile để FE luôn nhận permissions/accessProfile như /auth/refresh và /auth/me.
+  private async toUserResponse(user: User) {
+    const {
+      id,
+      email,
+      name,
+      phone,
+      role,
+      status,
+      avatarUrl,
+      createdAt,
+      updatedAt,
+      lastLoginAt,
+    } = user;
+    const roles = [role];
+    const access = await this.accessControlService.buildViewerAccess(
+      user,
+      roles,
+    );
+
+    return {
+      id,
+      email,
+      name,
+      phone,
+      role,
+      roles,
+      permissions: access.permissions,
+      permissionGrants: access.permissionGrants,
+      accessProfile: access.accessProfile,
+      status,
+      avatarUrl,
+      lastLoginAt,
+      createdAt,
+      updatedAt,
+    };
   }
 }

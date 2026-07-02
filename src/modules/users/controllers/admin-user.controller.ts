@@ -28,11 +28,8 @@ class UpdateStatusDto {
   status: UserStatus;
 }
 
-/**
- * Admin endpoints for user management.
- * RBAC is enforced at the API Gateway via @Roles decorator on the proxy controller.
- * This service trusts x-user-id header injected by the gateway.
- */
+// API quản lý user dành cho admin.
+// API Gateway đã chặn bằng @RequirePermissions(admin.access), service này chỉ nhận request có user context hợp lệ.
 @Controller("admin/users")
 export class AdminUserController {
   constructor(private readonly userService: UserService) {}
