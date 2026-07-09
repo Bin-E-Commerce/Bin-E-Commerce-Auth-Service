@@ -19,7 +19,6 @@ import { PermissionAuditLog } from "../../../database/entities/permission-audit-
 import { RolePermission } from "../../../database/entities/role-permission.entity";
 import { UserRoleAssignment } from "../../../database/entities/user-role-assignment.entity";
 import { User } from "../../../database/entities/user.entity";
-import { AccessControlCacheService } from "./access-control-cache.service";
 import type { UpdateRolePermissionDto } from "../dto/update-role-permission.dto";
 import type {
   AccessAreaDto,
@@ -27,12 +26,20 @@ import type {
   PermissionGrantDto,
   ViewerAccessDto,
 } from "../types/access-profile.type";
+import { AccessControlCacheService } from "./access-control-cache.service";
 
 export interface AccessControlActorContext {
   actorUserId: string | null;
   ipAddress: string | null;
   userAgent: string | null;
 }
+
+const ADMIN_CRITICAL_PERMISSION_CODES = new Set<Permission>([
+  Permission.ADMIN_ACCESS, // Quyền vào khung Admin Center.
+  Permission.ADMIN_DASHBOARD_VIEW, // Quyền xem dashboard mặc định sau khi vào Admin Center.
+  Permission.ADMIN_ACCESS_CONTROL_READ, // Quyền xem danh sách role, permission, menu trong Admin Center.
+  Permission.ADMIN_ACCESS_CONTROL_UPDATE, // Quyền cấp hoặc gỡ permission cho role.
+]);
 
 @Injectable()
 export class AccessControlService {
@@ -52,8 +59,8 @@ export class AccessControlService {
     private readonly cache: AccessControlCacheService,
   ) {}
 
-  // Build access profile cho viewer hiện tại; đây là dữ liệu FE dùng để render menu và điều hướng.
-  // Redis cache giúp /me, /refresh không join bảng role/permission/navigation liên tục.
+  // Build access profile cho user hiện tại để /me và /refresh trả về quyền, scope và menu mà FE được phép render.
+  // Kết quả được cache theo userId + permissionVersion để tránh join nhiều bảng role/permission/navigation ở mọi request.
   async buildViewerAccess(
     user: User,
     tokenRoles: string[] = [],
@@ -77,23 +84,25 @@ export class AccessControlService {
     return value;
   }
 
-  // Trả danh sách role/permission/navigation cho admin UI cấu hình quyền.
-  // Dữ liệu này dùng để hiển thị ma trận quyền và trạng thái menu hiện tại.
+  // Trả dữ liệu nền cho trang Admin Access Control: catalog role, catalog permission, permission đang gán và menu backend.
+  // Endpoint chỉ đọc dữ liệu, còn quyền được phép chỉnh sửa sẽ do controller thêm flag canUpdateRolePermissions dựa trên header.
   async getAdminOverview() {
-    const [roles, permissions, rolePermissions, navigation] = await Promise.all([
-      this.roleRepo.find({ order: { code: "ASC" } }),
-      this.permissionRepo.find({
-        where: { isActive: true },
-        order: { resource: "ASC", action: "ASC" },
-      }),
-      this.rolePermissionRepo.find({
-        relations: ["role", "permission"],
-        order: { createdAt: "ASC" },
-      }),
-      this.navigationRepo.find({
-        order: { area: "ASC", groupOrder: "ASC", sortOrder: "ASC" },
-      }),
-    ]);
+    const [roles, permissions, rolePermissions, navigation] = await Promise.all(
+      [
+        this.roleRepo.find({ order: { code: "ASC" } }),
+        this.permissionRepo.find({
+          where: { isActive: true },
+          order: { resource: "ASC", action: "ASC" },
+        }),
+        this.rolePermissionRepo.find({
+          relations: ["role", "permission"],
+          order: { createdAt: "ASC" },
+        }),
+        this.navigationRepo.find({
+          order: { area: "ASC", groupOrder: "ASC", sortOrder: "ASC" },
+        }),
+      ],
+    );
 
     return {
       permissionVersion: ACCESS_CONTROL_PERMISSION_VERSION,
@@ -104,21 +113,17 @@ export class AccessControlService {
     };
   }
 
-  // Cấp hoặc gỡ một permission cho role theo scope cụ thể.
-  // Role-permission ảnh hưởng tới nhiều user nên sau khi đổi phải xóa toàn bộ access profile cache.
+  // Bật hoặc tắt một permission cho role theo scope cụ thể, dùng cho màn Admin Access Control.
+  // Sau khi thay đổi role-permission phải ghi audit và xóa cache vì một role có thể đang ảnh hưởng tới nhiều user.
   async updateRolePermission(
     roleCode: UserRole,
     dto: UpdateRolePermissionDto,
     actor: AccessControlActorContext,
   ) {
-    if (
-      roleCode === UserRole.ADMIN &&
-      dto.permissionCode === Permission.ADMIN_ACCESS &&
-      dto.scope === PermissionScope.GLOBAL &&
-      !dto.enabled
-    ) {
+    // Chặn việc tự gỡ các quyền sống còn của ADMIN để tránh khóa toàn bộ hệ thống khỏi Admin Center.
+    if (this.isDisablingCriticalAdminPermission(roleCode, dto)) {
       throw new BadRequestException(
-        "Không thể gỡ admin.access khỏi role ADMIN để tránh tự khóa khu vực quản trị.",
+        "Không thể gỡ quyền quản trị cốt lõi khỏi role ADMIN để tránh tự khóa hệ thống.",
       );
     }
 
@@ -130,6 +135,7 @@ export class AccessControlService {
     if (!role) throw new NotFoundException("Không tìm thấy role.");
     if (!permission) throw new NotFoundException("Không tìm thấy permission.");
 
+    // Tìm record cũ theo role + permission + scope để update idempotent thay vì insert trùng.
     const existing = await this.rolePermissionRepo.findOne({
       where: {
         roleId: role.id,
@@ -156,12 +162,15 @@ export class AccessControlService {
       isActive: dto.enabled,
     });
 
+    // Audit log lưu before/after để sau này admin biết ai đã cấp/gỡ quyền nào, lúc nào và vì lý do gì.
     await this.auditRepo.save({
       actorUserId: actor.actorUserId,
       targetUserId: null,
       roleId: role.id,
       permissionId: permission.id,
-      action: dto.enabled ? "ROLE_PERMISSION_GRANTED" : "ROLE_PERMISSION_REVOKED",
+      action: dto.enabled
+        ? "ROLE_PERMISSION_GRANTED"
+        : "ROLE_PERMISSION_REVOKED",
       before,
       after: {
         roleCode,
@@ -174,6 +183,7 @@ export class AccessControlService {
       userAgent: actor.userAgent,
     });
 
+    // Xóa toàn bộ access profile cache để các user thuộc role này nhận quyền mới ở lần /me hoặc /refresh tiếp theo.
     await this.cache.invalidateAll();
 
     return this.rolePermissionRepo.findOneOrFail({
@@ -182,7 +192,21 @@ export class AccessControlService {
     });
   }
 
-  // Ưu tiên user_roles DB nếu admin đã gán; vẫn merge users.role và tokenRoles để tương thích dữ liệu cũ.
+  // Gom luật bảo vệ quyền cốt lõi của ADMIN vào một nơi để updateRolePermission chỉ đọc như luồng nghiệp vụ.
+  private isDisablingCriticalAdminPermission(
+    roleCode: UserRole,
+    dto: UpdateRolePermissionDto,
+  ): boolean {
+    return (
+      roleCode === UserRole.ADMIN &&
+      dto.scope === PermissionScope.GLOBAL &&
+      !dto.enabled &&
+      ADMIN_CRITICAL_PERMISSION_CODES.has(dto.permissionCode)
+    );
+  }
+
+  // Resolve role cuối cùng của user từ 3 nguồn: users.role cũ, role trong token và bảng user_role_assignments mới.
+  // DB assignment được dùng để admin cấp role linh hoạt, còn tokenRoles giúp tương thích khi Keycloak vẫn trả role cũ.
   private async resolveUserRoles(
     user: User,
     tokenRoles: string[],
@@ -199,10 +223,12 @@ export class AccessControlService {
       .map((assignment) => assignment.role?.code)
       .filter(Boolean);
 
+    // normalizeBusinessRoles loại bỏ role kỹ thuật/role rác và trả về danh sách role nghiệp vụ hợp lệ của hệ thống.
     return normalizeBusinessRoles([user.role, ...tokenRoles, ...assignedRoles]);
   }
 
-  // Gom permission theo các role nghiệp vụ, merge nhiều scope của cùng một permission thành một grant duy nhất.
+  // Từ danh sách role, lấy các permission đang bật và merge nhiều scope của cùng một permission thành một grant duy nhất.
+  // Ví dụ seller.order.read có thể có scope own_shop, còn admin.access dùng global; FE và gateway đều đọc cùng grant này.
   private async resolvePermissionGrants(
     roles: UserRole[],
   ): Promise<PermissionGrantDto[]> {
@@ -237,7 +263,7 @@ export class AccessControlService {
     }));
   }
 
-  // Build profile theo từng area để FE không phải tự đoán admin/seller default route và sidebar.
+  // Build accessProfile theo từng area để FE không hard-code route mặc định, sidebar admin/seller hoặc quyền vào khu vực.
   private async buildAccessProfile(grants: PermissionGrantDto[]) {
     const grantByCode = new Map(grants.map((grant) => [grant.code, grant]));
     const navigation = await this.navigationRepo.find({
@@ -267,8 +293,8 @@ export class AccessControlService {
     };
   }
 
-  // Lọc navigation theo permission/scope và tách quyền vào khu vực khỏi quyền có menu.
-  // Seller Center dùng seller.access để vào khung; từng màn hình con như dashboard vẫn được điều khiển bằng permission riêng.
+  // Build một area cụ thể bằng cách kiểm tra quyền vào khu vực và lọc menu theo permission/scope của từng item.
+  // Quyền access như admin.access hoặc seller.access chỉ mở khung; từng màn hình con vẫn cần permission riêng.
   private buildArea(
     area: "admin" | "seller",
     navigation: NavigationItem[],
@@ -280,27 +306,32 @@ export class AccessControlService {
     const items = navigation
       .filter((item) => item.area === area)
       .filter((item) => this.canRenderNavigationItem(item, grantByCode))
-      .map((item): AccessNavigationItemDto => ({
-        code: item.code,
-        groupCode: item.groupCode,
-        groupLabel: item.groupLabel,
-        groupOrder: item.groupOrder,
-        label: item.label,
-        description: item.description,
-        href: item.href,
-        icon: item.icon,
-        sortOrder: item.sortOrder,
-        requiredPermissionCode: item.requiredPermissionCode,
-      }));
+      .map(
+        (item): AccessNavigationItemDto => ({
+          code: item.code,
+          groupCode: item.groupCode,
+          groupLabel: item.groupLabel,
+          groupOrder: item.groupOrder,
+          label: item.label,
+          description: item.description,
+          href: item.href,
+          icon: item.icon,
+          sortOrder: item.sortOrder,
+          requiredPermissionCode: item.requiredPermissionCode,
+        }),
+      );
 
     return {
       canAccess: hasAreaAccess,
-      defaultRoute: hasAreaAccess ? items[0]?.href ?? explicitDefaultRoute : null,
+      defaultRoute: hasAreaAccess
+        ? (items[0]?.href ?? explicitDefaultRoute)
+        : null,
       navigation: items,
     };
   }
 
-  // Kiểm tra một menu item có được render không dựa trên permission và scope backend đã cấp.
+  // Quyết định một navigation item có được trả cho FE hay không dựa trên permission bắt buộc và scope bắt buộc.
+  // Nếu item không yêu cầu scope cụ thể thì chỉ cần có permission; nếu có scope thì grant phải chứa đúng scope đó.
   private canRenderNavigationItem(
     item: NavigationItem,
     grantByCode: Map<Permission, PermissionGrantDto>,
