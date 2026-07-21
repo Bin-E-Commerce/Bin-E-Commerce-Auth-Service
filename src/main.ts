@@ -2,6 +2,7 @@ import { NestFactory } from "@nestjs/core";
 import { ValidationPipe, VersioningType } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
+import { Transport } from "@nestjs/microservices";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
@@ -17,6 +18,28 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService);
   const isDev = config.get<string>("NODE_ENV") !== "production";
   const port = config.get<number>("PORT", 3002);
+  const kafkaBrokers = config
+    .get<string>("KAFKA_BROKERS", "localhost:29092")
+    .split(",")
+    .map((broker) => broker.trim())
+    .filter(Boolean);
+
+  // Kết nối Kafka consumer cùng tiến trình HTTP để auth-service nhận sự kiện duyệt seller mà không cần endpoint nội bộ mới.
+  app.connectMicroservice({
+    transport: Transport.KAFKA,
+    options: {
+      client: {
+        clientId: "auth-service-seller-consumer",
+        brokers: kafkaBrokers,
+      },
+      consumer: {
+        groupId: config.get<string>(
+          "KAFKA_GROUP_ID",
+          "auth-service-seller-role",
+        ),
+      },
+    },
+  });
 
   app.use(cookieParser());
 
@@ -55,6 +78,8 @@ async function bootstrap(): Promise<void> {
   // Graceful shutdown hooks để đảm bảo rằng auth service có thể tắt một cách an toàn khi nhận được tín hiệu dừng (ví dụ: SIGINT, SIGTERM)
   app.enableShutdownHooks();
 
+  // Khởi động consumer trước HTTP listener để service không nhận request khi luồng đồng bộ role chưa sẵn sàng.
+  await app.startAllMicroservices();
   await app.listen(port);
   console.log(`[auth-service] Running on port ${port}`);
 }
