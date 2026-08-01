@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "nest build",
-    "start": "node --max-old-space-size=100 dist/main",
+    "start": "node --max-old-space-size=100 dist/services/auth-service/src/main.js",
     "dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "lint": "eslint src --ext .ts",
