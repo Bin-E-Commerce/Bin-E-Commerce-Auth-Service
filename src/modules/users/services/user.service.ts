@@ -1,3 +1,6 @@
+// File này chứa application service quản lý profile, địa chỉ và session của user.
+// Order Service chỉ được đọc địa chỉ sau khi service này xác nhận ownership theo keycloakId.
+
 import {
   Injectable,
   NotFoundException,
@@ -180,6 +183,16 @@ export class UserService {
     return tokens
       .filter((token) => token.expiresAt > now)
       .map((token) => this.toSessionResponse(token, currentSessionId));
+  }
+
+  // Trả địa chỉ đã kiểm tra ownership cho service checkout; caller không thể truyền local user id tùy ý.
+  async getOwnedAddress(userId: string, addressId: string): Promise<UserAddress> {
+    const localId = await this.resolveUserId(userId);
+    const address = await this.addressRepo.findOne({
+      where: { id: addressId, userId: localId },
+    });
+    if (!address) throw new NotFoundException("Address not found");
+    return address;
   }
 
   // Thu hồi một phiên thuộc về user hiện tại; không cho chạm vào phiên của user khác.

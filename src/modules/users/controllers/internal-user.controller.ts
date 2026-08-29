@@ -1,7 +1,13 @@
+// File này công bố các contract nội bộ của Auth Service cho service khác.
+// Các endpoint đều yêu cầu internal token và không cho caller tự chọn user ngoài x-user-id.
+
 import {
   Body,
   Controller,
+  Get,
   Headers,
+  Param,
+  ParseUUIDPipe,
   Put,
   UnauthorizedException,
   UseGuards,
@@ -33,5 +39,15 @@ export class InternalUserController {
       message: "Avatar updated",
       statusCode: 200,
     };
+  }
+
+  // Xác nhận địa chỉ thuộc user hiện tại rồi trả snapshot cho Order Service lưu bất biến.
+  @Get("addresses/:addressId")
+  async getOwnedAddress(
+    @Headers("x-user-id") userId: string | undefined,
+    @Param("addressId", new ParseUUIDPipe()) addressId: string,
+  ) {
+    if (!userId) throw new UnauthorizedException("Missing authenticated user context");
+    return this.userService.getOwnedAddress(userId, addressId);
   }
 }
