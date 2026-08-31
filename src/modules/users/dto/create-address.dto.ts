@@ -5,6 +5,8 @@ import {
   MaxLength,
   Matches,
 } from "class-validator";
+import { IsInt, Min } from "class-validator";
+import { Type } from "class-transformer";
 
 export class CreateAddressDto {
   // Label dùng để người dùng dễ dàng nhận biết địa chỉ (ví dụ: "Nhà", "Cơ quan")
@@ -27,15 +29,41 @@ export class CreateAddressDto {
   @MaxLength(100)
   province: string;
 
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  ghnProvinceId: number;
+
+  @IsString()
+  @MaxLength(100)
+  ghnProvinceName: string;
+
   // Quận/huyện của địa chỉ, ví dụ: "Quận 1", "Huyện Thanh Trì", v.v.
   @IsString()
   @MaxLength(100)
   district: string;
 
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  ghnDistrictId: number;
+
+  @IsString()
+  @MaxLength(100)
+  ghnDistrictName: string;
+
   // Phường/xã của địa chỉ, ví dụ: "Phường Bến Nghé", "Xã Tứ Hiệp", v.v.
   @IsString()
   @MaxLength(100)
   ward: string;
+
+  @IsString()
+  @MaxLength(30)
+  ghnWardCode: string;
+
+  @IsString()
+  @MaxLength(100)
+  ghnWardName: string;
 
   // Đường phố và số nhà, ví dụ: "123 Đường Lê Lợi", "Số 456, Ngõ 789", v.v.
   @IsString()

@@ -5,6 +5,8 @@ import {
   MaxLength,
   Matches,
 } from "class-validator";
+import { IsInt, Min } from "class-validator";
+import { Type } from "class-transformer";
 
 export class UpdateAddressDto {
   @IsOptional()
@@ -28,14 +30,46 @@ export class UpdateAddressDto {
   province?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  ghnProvinceId?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  ghnProvinceName?: string;
+
+  @IsOptional()
   @IsString()
   @MaxLength(100)
   district?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  ghnDistrictId?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  ghnDistrictName?: string;
+
+  @IsOptional()
   @IsString()
   @MaxLength(100)
   ward?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  ghnWardCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  ghnWardName?: string;
 
   @IsOptional()
   @IsString()

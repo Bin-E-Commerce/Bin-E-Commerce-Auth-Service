@@ -133,6 +133,7 @@ export class UserService {
       where: { id: addressId, userId: localId },
     });
     if (!address) throw new NotFoundException("Address not found");
+    this.ensureCompleteGhnAddressUpdate(dto);
 
     if (dto.isDefault === true && !address.isDefault) {
       await this.addressRepo.update(
@@ -143,6 +144,35 @@ export class UserService {
 
     Object.assign(address, dto);
     return this.addressRepo.save(address);
+  }
+
+  // Địa chỉ GHN được cập nhật theo một nhóm nguyên tử để không tạo record chỉ có một phần mã địa lý.
+  private ensureCompleteGhnAddressUpdate(dto: UpdateAddressDto): void {
+    const ghnFields = [
+      "ghnProvinceId",
+      "ghnProvinceName",
+      "ghnDistrictId",
+      "ghnDistrictName",
+      "ghnWardCode",
+      "ghnWardName",
+    ] as const;
+    const hasGhnChange = ghnFields.some((field) => dto[field] !== undefined);
+    if (!hasGhnChange) return;
+
+    const hasValidValues =
+      Number.isInteger(dto.ghnProvinceId) &&
+      (dto.ghnProvinceId ?? 0) > 0 &&
+      Boolean(dto.ghnProvinceName?.trim()) &&
+      Number.isInteger(dto.ghnDistrictId) &&
+      (dto.ghnDistrictId ?? 0) > 0 &&
+      Boolean(dto.ghnDistrictName?.trim()) &&
+      Boolean(dto.ghnWardCode?.trim()) &&
+      Boolean(dto.ghnWardName?.trim());
+    if (!hasValidValues) {
+      throw new BadRequestException(
+        "Địa chỉ phải có đủ mã và tên tỉnh/thành phố, quận/huyện, phường/xã GHN.",
+      );
+    }
   }
 
   async deleteAddress(userId: string, addressId: string): Promise<void> {
