@@ -8,6 +8,7 @@ import {
   Headers,
   Param,
   ParseUUIDPipe,
+  Query,
   Put,
   UnauthorizedException,
   UseGuards,
@@ -47,7 +48,8 @@ export class InternalUserController {
     @Headers("x-user-id") userId: string | undefined,
     @Param("addressId", new ParseUUIDPipe()) addressId: string,
   ) {
-    if (!userId) throw new UnauthorizedException("Missing authenticated user context");
+    if (!userId)
+      throw new UnauthorizedException("Missing authenticated user context");
     return this.userService.getOwnedAddress(userId, addressId);
   }
 
@@ -56,5 +58,21 @@ export class InternalUserController {
   async getUserEmail(@Param("userId") userId: string) {
     const user = await this.userService.getProfile(userId);
     return { email: user.email };
+  }
+
+  // Trả về profile hiện thị tối thiểu cho danh sách review; endpoint chỉ mở cho service có internal token.
+  @Get("public-profiles")
+  async getPublicProfiles(@Query("ids") idsHeader?: string) {
+    const keycloakIds = (idsHeader ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .slice(0, 100);
+
+    return {
+      data: await this.userService.getPublicProfiles(keycloakIds),
+      message: "Public profiles retrieved",
+      statusCode: 200,
+    };
   }
 }

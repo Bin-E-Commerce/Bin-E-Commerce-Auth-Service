@@ -9,7 +9,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, IsNull } from "typeorm";
+import { In, Repository, IsNull } from "typeorm";
 
 import { User } from "../../../database/entities/user.entity";
 import { UserAddress } from "../../../database/entities/user-address.entity";
@@ -58,6 +58,28 @@ export class UserService {
     return user;
   }
 
+  // Chỉ trả tên và avatarUrl để các service nội bộ hiển thị profile công khai mà không lộ email hoặc số điện thoại.
+  async getPublicProfiles(keycloakIds: string[]): Promise<
+    Array<{
+      keycloakId: string;
+      name: string;
+      avatarUrl: string | null;
+    }>
+  > {
+    if (keycloakIds.length === 0) return [];
+
+    const users = await this.userRepo.find({
+      where: { keycloakId: In(keycloakIds) },
+      select: ["keycloakId", "name", "avatarUrl"],
+    });
+
+    return users.map((user) => ({
+      keycloakId: user.keycloakId,
+      name: user.name,
+      avatarUrl: user.avatarUrl,
+    }));
+  }
+
   // Cập nhật các trường hồ sơ công khai; avatar được tách sang luồng nội bộ do Media Service xác nhận.
   async updateProfile(userId: string, dto: UpdateProfileDto): Promise<User> {
     const user = await this.getProfile(userId);
@@ -101,7 +123,7 @@ export class UserService {
   ): Promise<UserAddress> {
     const localId = await this.resolveUserId(userId);
     const count = await this.addressRepo.count({ where: { userId: localId } });
-    // Giới hạn số lượng địa chỉ mà một người dùng có thể tạo để tránh spam và quản lý dễ dàng hơn. 
+    // Giới hạn số lượng địa chỉ mà một người dùng có thể tạo để tránh spam và quản lý dễ dàng hơn.
     // Nếu đã đạt giới hạn, trả về lỗi 422 Unprocessable Entity.
     if (count >= MAX_ADDRESSES) {
       throw new UnprocessableEntityException(
@@ -109,8 +131,8 @@ export class UserService {
       );
     }
 
-    // Nếu địa chỉ mới được tạo có isDefault=true, 
-    // thì cần đảm bảo rằng tất cả các địa chỉ khác của người dùng này sẽ có isDefault=false 
+    // Nếu địa chỉ mới được tạo có isDefault=true,
+    // thì cần đảm bảo rằng tất cả các địa chỉ khác của người dùng này sẽ có isDefault=false
     // để duy trì tính nhất quán, tức là chỉ có một địa chỉ mặc định duy nhất cho mỗi người dùng.
     if (dto.isDefault) {
       await this.addressRepo.update(
@@ -216,7 +238,10 @@ export class UserService {
   }
 
   // Trả địa chỉ đã kiểm tra ownership cho service checkout; caller không thể truyền local user id tùy ý.
-  async getOwnedAddress(userId: string, addressId: string): Promise<UserAddress> {
+  async getOwnedAddress(
+    userId: string,
+    addressId: string,
+  ): Promise<UserAddress> {
     const localId = await this.resolveUserId(userId);
     const address = await this.addressRepo.findOne({
       where: { id: addressId, userId: localId },
@@ -277,7 +302,8 @@ export class UserService {
       deviceType: token.deviceType ?? "desktop",
       browser: token.browser ?? "Không rõ",
       os: token.os ?? "Không rõ",
-      loginMethod: token.loginMethod ?? (token.clientId ? "google" : "password"),
+      loginMethod:
+        token.loginMethod ?? (token.clientId ? "google" : "password"),
       ipAddress: token.ipAddress,
       location: token.location,
       userAgent: token.userAgent,
