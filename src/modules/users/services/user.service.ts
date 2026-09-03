@@ -36,6 +36,22 @@ export class UserService {
     private readonly keycloakAdmin: KeycloakAdminService,
   ) {}
 
+  // Lấy hoạt động gần nhất từ refresh session còn hiệu lực, fallback về lần đăng nhập cuối nếu chưa có activity detail.
+  async getPublicActivity(userId: string): Promise<{ lastActiveAt: Date | null }> {
+    const user = await this.userRepo.findOne({ where: { keycloakId: userId }, select: ["id", "lastLoginAt"] });
+    if (!user) throw new NotFoundException("User not found");
+    const session = await this.refreshTokenRepo
+      .createQueryBuilder("session")
+      .select(["session.lastActiveAt"])
+      .where("session.userId = :userId", { userId: user.id })
+      .andWhere("session.revokedAt IS NULL")
+      .andWhere("session.expiresAt > :now", { now: new Date() })
+      .andWhere("session.lastActiveAt IS NOT NULL")
+      .orderBy("session.lastActiveAt", "DESC")
+      .getOne();
+    return { lastActiveAt: session?.lastActiveAt ?? user.lastLoginAt ?? null };
+  }
+
   // ─────────────────────────────── HELPERS ──────────────────────────────────
 
   // x-user-id từ JWT gateway = Keycloak sub (keycloakId), KHÁC với user.id (PostgreSQL UUID).

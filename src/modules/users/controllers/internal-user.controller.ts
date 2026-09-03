@@ -75,4 +75,10 @@ export class InternalUserController {
       statusCode: 200,
     };
   }
+
+  // Trả timestamp activity tối thiểu cho Seller hiển thị trạng thái online mà không làm lộ session hoặc token detail.
+  @Get(":userId/activity")
+  async getUserActivity(@Param("userId") userId: string) {
+    return this.userService.getPublicActivity(userId);
+  }
 }
