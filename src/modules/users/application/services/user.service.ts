@@ -11,16 +11,16 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { In, Repository, IsNull } from "typeorm";
 
-import { User } from "../../../database/entities/user.entity";
-import { UserAddress } from "../../../database/entities/user-address.entity";
-import { RefreshToken } from "../../../database/entities/refresh-token.entity";
+import { User } from "../../../../database/entities/user.entity";
+import { UserAddress } from "../../../../database/entities/user-address.entity";
+import { RefreshToken } from "../../../../database/entities/refresh-token.entity";
 import { UserRole } from "@common/enums/user-role.enum";
 import { UserStatus } from "@common/enums/user-status.enum";
-import { KeycloakAdminService } from "../../auth/services/keycloak-admin.service";
-import { UpdateProfileDto } from "../dto/update-profile.dto";
-import { CreateAddressDto } from "../dto/create-address.dto";
-import { UpdateAddressDto } from "../dto/update-address.dto";
-import { SessionResponseDto } from "../dto/session-response.dto";
+import { KeycloakAdminService } from "../../../auth/application/services/keycloak-admin.service";
+import { UpdateProfileDto } from "../../presentation/dto/update-profile.dto";
+import { CreateAddressDto } from "../../presentation/dto/create-address.dto";
+import { UpdateAddressDto } from "../../presentation/dto/update-address.dto";
+import { SessionResponseDto } from "../../presentation/dto/session-response.dto";
 
 const MAX_ADDRESSES = 5;
 

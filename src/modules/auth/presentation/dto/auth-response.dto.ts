@@ -1,5 +1,5 @@
-import { User } from "../../../database/entities/user.entity";
-import type { AccessProfileDto, PermissionGrantDto } from "../../access-control/types/access-profile.type";
+import { User } from "../../../../database/entities/user.entity";
+import type { AccessProfileDto, PermissionGrantDto } from "../../../access-control/application/types/access-profile.type";
 
 export interface AuthUserResponse
   extends Pick<

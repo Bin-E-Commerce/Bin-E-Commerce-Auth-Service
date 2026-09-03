@@ -2,11 +2,11 @@ import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { UserRole } from "@common/enums/user-role.enum";
 import { Repository } from "typeorm";
-import { AccessRole } from "../../../database/entities/access-role.entity";
-import { UserRoleAssignment } from "../../../database/entities/user-role-assignment.entity";
-import { User } from "../../../database/entities/user.entity";
-import { AccessControlCacheService } from "../../access-control/services/access-control-cache.service";
-import { KeycloakAdminService } from "../../auth/services/keycloak-admin.service";
+import { AccessRole } from "../../../../database/entities/access-role.entity";
+import { UserRoleAssignment } from "../../../../database/entities/user-role-assignment.entity";
+import { User } from "../../../../database/entities/user.entity";
+import { AccessControlCacheService } from "../../../access-control/application/services/access-control-cache.service";
+import { KeycloakAdminService } from "../../../auth/application/services/keycloak-admin.service";
 
 @Injectable()
 export class SellerRoleAssignmentService {

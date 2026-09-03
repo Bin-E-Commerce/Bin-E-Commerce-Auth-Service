@@ -7,10 +7,10 @@ import { PermissionAuditLog } from "../../database/entities/permission-audit-log
 import { RolePermission } from "../../database/entities/role-permission.entity";
 import { UserRoleAssignment } from "../../database/entities/user-role-assignment.entity";
 import { RedisModule } from "../../database/redis/redis.module";
-import { AccessControlController } from "./controllers/access-control.controller";
-import { AccessControlCacheService } from "./services/access-control-cache.service";
-import { AccessControlSeedService } from "./services/access-control-seed.service";
-import { AccessControlService } from "./services/access-control.service";
+import { AccessControlController } from "./presentation/controllers/access-control.controller";
+import { AccessControlCacheService } from "./application/services/access-control-cache.service";
+import { AccessControlSeedService } from "./application/services/access-control-seed.service";
+import { AccessControlService } from "./application/services/access-control.service";
 
 @Module({
   imports: [

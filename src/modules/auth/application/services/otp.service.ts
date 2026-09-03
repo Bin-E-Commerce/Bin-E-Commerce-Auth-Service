@@ -8,9 +8,9 @@ import {
 } from "@nestjs/common";
 import { createHash, randomInt } from "crypto";
 import type Redis from "ioredis";
-import { REDIS_CLIENT } from "../../../database/redis/redis.module";
-import { OtpPurpose } from "../../../database/entities/otp-challenge.entity";
-import { KafkaProducerService } from "../../../kafka/kafka-producer.service";
+import { REDIS_CLIENT } from "../../../../database/redis/redis.module";
+import { OtpPurpose } from "../../../../database/entities/otp-challenge.entity";
+import { KafkaProducerService } from "../../../../kafka/kafka-producer.service";
 import {
   NotificationEvents,
   OtpRequestedPayload,

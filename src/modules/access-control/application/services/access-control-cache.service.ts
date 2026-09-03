@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type Redis from "ioredis";
-import { REDIS_CLIENT } from "../../../database/redis/redis.module";
+import { REDIS_CLIENT } from "../../../../database/redis/redis.module";
 import type { ViewerAccessDto } from "../types/access-profile.type";
 
 const ACCESS_PROFILE_TTL_SECONDS = 10 * 60; // 10 phút là TTL hợp lý cho cache quyền của user, vì quyền của user không thay đổi quá thường xuyên.

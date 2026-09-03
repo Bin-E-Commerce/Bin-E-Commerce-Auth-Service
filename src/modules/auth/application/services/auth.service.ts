@@ -13,25 +13,25 @@ import { randomUUID } from "crypto";
 import { ConfigService } from "@nestjs/config";
 import { normalizeBusinessRoles } from "@common/auth";
 
-import { User } from "../../../database/entities/user.entity";
-import { RefreshToken } from "../../../database/entities/refresh-token.entity";
-import { OtpPurpose } from "../../../database/entities/otp-challenge.entity";
+import { User } from "../../../../database/entities/user.entity";
+import { RefreshToken } from "../../../../database/entities/refresh-token.entity";
+import { OtpPurpose } from "../../../../database/entities/otp-challenge.entity";
 import { UserRole } from "@common/enums/user-role.enum";
 import { UserStatus } from "@common/enums/user-status.enum";
 
 import { KeycloakAdminService } from "./keycloak-admin.service";
 import { OtpService } from "./otp.service";
 import { TokenService, TokenPair } from "./token.service";
-import { RegisterInitiateDto } from "../dto/register-initiate.dto";
-import { RegisterVerifyDto } from "../dto/register-verify.dto";
-import { LoginDto } from "../dto/login.dto";
-import { SocialCallbackDto } from "../dto/social-callback.dto";
-import { ForgotPasswordDto } from "../dto/forgot-password.dto";
-import { ResetPasswordDto } from "../dto/reset-password.dto";
-import { ChangePasswordDto } from "../dto/change-password.dto";
-import { AuthResponse, AuthUserResponse } from "../dto/auth-response.dto";
-import { SessionResponseDto } from "../../users/dto/session-response.dto";
-import { AccessControlService } from "../../access-control/services/access-control.service";
+import { RegisterInitiateDto } from "../../presentation/dto/register-initiate.dto";
+import { RegisterVerifyDto } from "../../presentation/dto/register-verify.dto";
+import { LoginDto } from "../../presentation/dto/login.dto";
+import { SocialCallbackDto } from "../../presentation/dto/social-callback.dto";
+import { ForgotPasswordDto } from "../../presentation/dto/forgot-password.dto";
+import { ResetPasswordDto } from "../../presentation/dto/reset-password.dto";
+import { ChangePasswordDto } from "../../presentation/dto/change-password.dto";
+import { AuthResponse, AuthUserResponse } from "../../presentation/dto/auth-response.dto";
+import { SessionResponseDto } from "../../../users/presentation/dto/session-response.dto";
+import { AccessControlService } from "../../../access-control/application/services/access-control.service";
 
 @Injectable()
 export class AuthService {

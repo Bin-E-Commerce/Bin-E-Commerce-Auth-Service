@@ -4,7 +4,7 @@ import {
   SellerApplicationReviewedEvent,
   SellerEvents,
 } from "@common/kafka/events";
-import { SellerRoleAssignmentService } from "../../modules/users/services/seller-role-assignment.service";
+import { SellerRoleAssignmentService } from "../../modules/users/application/services/seller-role-assignment.service";
 
 @Controller()
 export class SellerApplicationConsumer {

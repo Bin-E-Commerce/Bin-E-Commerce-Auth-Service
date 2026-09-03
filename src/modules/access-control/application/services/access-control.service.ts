@@ -12,14 +12,14 @@ import {
 } from "@common/auth";
 import { UserRole } from "@common/enums/user-role.enum";
 import { In, IsNull, MoreThan, Repository } from "typeorm";
-import { AccessPermission } from "../../../database/entities/access-permission.entity";
-import { AccessRole } from "../../../database/entities/access-role.entity";
-import { NavigationItem } from "../../../database/entities/navigation-item.entity";
-import { PermissionAuditLog } from "../../../database/entities/permission-audit-log.entity";
-import { RolePermission } from "../../../database/entities/role-permission.entity";
-import { UserRoleAssignment } from "../../../database/entities/user-role-assignment.entity";
-import { User } from "../../../database/entities/user.entity";
-import type { UpdateRolePermissionDto } from "../dto/update-role-permission.dto";
+import { AccessPermission } from "../../../../database/entities/access-permission.entity";
+import { AccessRole } from "../../../../database/entities/access-role.entity";
+import { NavigationItem } from "../../../../database/entities/navigation-item.entity";
+import { PermissionAuditLog } from "../../../../database/entities/permission-audit-log.entity";
+import { RolePermission } from "../../../../database/entities/role-permission.entity";
+import { UserRoleAssignment } from "../../../../database/entities/user-role-assignment.entity";
+import { User } from "../../../../database/entities/user.entity";
+import type { UpdateRolePermissionDto } from "../../presentation/dto/update-role-permission.dto";
 import type {
   AccessAreaDto,
   AccessNavigationItemDto,

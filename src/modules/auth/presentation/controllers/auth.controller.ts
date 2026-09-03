@@ -14,7 +14,7 @@ import {
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 
-import { AuthService } from "../services/auth.service";
+import { AuthService } from "../../application/services/auth.service";
 import { RegisterInitiateDto } from "../dto/register-initiate.dto";
 import { RegisterVerifyDto } from "../dto/register-verify.dto";
 import { LoginDto } from "../dto/login.dto";

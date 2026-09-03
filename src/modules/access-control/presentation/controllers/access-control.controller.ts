@@ -12,7 +12,7 @@ import { Permission } from "@common/auth";
 import { UserRole } from "@common/enums/user-role.enum";
 import type { Request } from "express";
 import { UpdateRolePermissionDto } from "../dto/update-role-permission.dto";
-import { AccessControlService } from "../services/access-control.service";
+import { AccessControlService } from "../../application/services/access-control.service";
 
 @Controller("auth/access-control")
 export class AccessControlController {

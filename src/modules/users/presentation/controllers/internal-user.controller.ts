@@ -15,7 +15,7 @@ import {
 } from "@nestjs/common";
 import { UpdateAvatarInternalDto } from "../dto/update-avatar-internal.dto";
 import { InternalServiceGuard } from "../guards/internal-service.guard";
-import { UserService } from "../services/user.service";
+import { UserService } from "../../application/services/user.service";
 
 @Controller("internal/users")
 @UseGuards(InternalServiceGuard)

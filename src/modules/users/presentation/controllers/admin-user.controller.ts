@@ -10,7 +10,7 @@ import {
   ParseIntPipe,
   DefaultValuePipe,
 } from "@nestjs/common";
-import { UserService } from "../services/user.service";
+import { UserService } from "../../application/services/user.service";
 import { UserRole } from "@common/enums/user-role.enum";
 import { UserStatus } from "@common/enums/user-status.enum";
 import { IsIn } from "class-validator";

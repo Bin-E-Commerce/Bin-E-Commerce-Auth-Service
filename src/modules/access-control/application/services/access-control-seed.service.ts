@@ -8,10 +8,10 @@ import {
   ROLE_PERMISSION_DEFINITIONS,
 } from "@common/auth";
 import { Repository } from "typeorm";
-import { AccessPermission } from "../../../database/entities/access-permission.entity";
-import { AccessRole } from "../../../database/entities/access-role.entity";
-import { NavigationItem } from "../../../database/entities/navigation-item.entity";
-import { RolePermission } from "../../../database/entities/role-permission.entity";
+import { AccessPermission } from "../../../../database/entities/access-permission.entity";
+import { AccessRole } from "../../../../database/entities/access-role.entity";
+import { NavigationItem } from "../../../../database/entities/navigation-item.entity";
+import { RolePermission } from "../../../../database/entities/role-permission.entity";
 
 @Injectable()
 export class AccessControlSeedService implements OnModuleInit {

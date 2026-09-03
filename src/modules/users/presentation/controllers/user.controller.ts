@@ -11,12 +11,12 @@ import {
   HttpCode,
   HttpStatus,
 } from "@nestjs/common";
-import { UserService } from "../services/user.service";
+import { UserService } from "../../application/services/user.service";
 import { UpdateProfileDto } from "../dto/update-profile.dto";
 import { CreateAddressDto } from "../dto/create-address.dto";
 import { UpdateAddressDto } from "../dto/update-address.dto";
-import { User } from "../../../database/entities/user.entity";
-import { AccessControlService } from "../../access-control/services/access-control.service";
+import { User } from "../../../../database/entities/user.entity";
+import { AccessControlService } from "../../../access-control/application/services/access-control.service";
 
 @Controller("users")
 export class UserController {
