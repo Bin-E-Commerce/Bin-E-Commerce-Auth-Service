@@ -96,6 +96,45 @@ export class UserService {
     }));
   }
 
+  // Trả projection tài khoản tối thiểu cho Recommendation Admin; chỉ internal service mới được đọc email/số điện thoại.
+  async getRecommendationProfiles(search?: string, keycloakIds: string[] = []) {
+    const normalizedIds = [...new Set(keycloakIds.map((id) => id.trim()).filter(Boolean))].slice(0, 100);
+    const normalizedSearch = search?.trim();
+    const query = this.userRepo
+      .createQueryBuilder("user")
+      .select([
+        "user.keycloakId",
+        "user.name",
+        "user.email",
+        "user.phone",
+        "user.avatarUrl",
+      ])
+      .orderBy("user.createdAt", "DESC")
+      .take(100);
+
+    if (normalizedIds.length > 0) {
+      query.where("user.keycloakId IN (:...keycloakIds)", {
+        keycloakIds: normalizedIds,
+      });
+    }
+
+    if (normalizedSearch) {
+      query.andWhere(
+        "(user.name ILIKE :search OR user.email ILIKE :search OR COALESCE(user.phone, '') ILIKE :search)",
+        { search: `%${normalizedSearch}%` },
+      );
+    }
+
+    const users = await query.getMany();
+    return users.map((user) => ({
+      keycloakId: user.keycloakId,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      avatarUrl: user.avatarUrl,
+    }));
+  }
+
   // Cập nhật các trường hồ sơ công khai; avatar được tách sang luồng nội bộ do Media Service xác nhận.
   async updateProfile(userId: string, dto: UpdateProfileDto): Promise<User> {
     const user = await this.getProfile(userId);

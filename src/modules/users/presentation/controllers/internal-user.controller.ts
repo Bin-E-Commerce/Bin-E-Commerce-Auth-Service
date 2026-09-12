@@ -76,6 +76,28 @@ export class InternalUserController {
     };
   }
 
+  // Cung cấp dữ liệu account cho analytics nội bộ; email/số điện thoại không được mở qua public-profile contract.
+  @Get("recommendation-profiles")
+  async getRecommendationProfiles(
+    @Query("ids") idsHeader?: string,
+    @Query("search") search?: string,
+  ) {
+    const keycloakIds = (idsHeader ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .slice(0, 100);
+
+    return {
+      data: await this.userService.getRecommendationProfiles(
+        search,
+        keycloakIds,
+      ),
+      message: "Recommendation profiles retrieved",
+      statusCode: 200,
+    };
+  }
+
   // Trả timestamp activity tối thiểu cho Seller hiển thị trạng thái online mà không làm lộ session hoặc token detail.
   @Get(":userId/activity")
   async getUserActivity(@Param("userId") userId: string) {
