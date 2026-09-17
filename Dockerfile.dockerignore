@@ -1,0 +1,33 @@
+# File này áp dụng cho services/auth-service/Dockerfile khi build từ repository root.
+# Chỉ giữ manifest, source Auth Service và packages/common cần cho compile.
+
+.git
+.gitignore
+.env
+.env.*
+**/.env
+**/.env.*
+
+**/node_modules
+**/dist
+**/coverage
+**/.turbo
+**/.cache
+**/*.log
+**/*.tsbuildinfo
+
+# Không gửi source, test và tài liệu của service khác vào context.
+services/*/src
+!services/auth-service/src
+!services/auth-service/src/**
+services/*/test
+services/*/tests
+services/*/README.md
+
+# Auth Service không cần các script local hoặc artifact build.
+**/README.md
+**/scripts
+
+# Giữ package chung để TypeScript resolve alias @common.
+packages/*/node_modules
+packages/*/dist
