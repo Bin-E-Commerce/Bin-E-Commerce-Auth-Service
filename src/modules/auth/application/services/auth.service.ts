@@ -29,7 +29,10 @@ import { SocialCallbackDto } from "../../presentation/dto/social-callback.dto";
 import { ForgotPasswordDto } from "../../presentation/dto/forgot-password.dto";
 import { ResetPasswordDto } from "../../presentation/dto/reset-password.dto";
 import { ChangePasswordDto } from "../../presentation/dto/change-password.dto";
-import { AuthResponse, AuthUserResponse } from "../../presentation/dto/auth-response.dto";
+import {
+  AuthResponse,
+  AuthUserResponse,
+} from "../../presentation/dto/auth-response.dto";
 import { SessionResponseDto } from "../../../users/presentation/dto/session-response.dto";
 import { AccessControlService } from "../../../access-control/application/services/access-control.service";
 
@@ -211,6 +214,7 @@ export class AuthService {
 
   // ─────────────────────────────── SOCIAL ──────────────────────────────────
 
+  // Tạo URL social login và state chống CSRF; trình duyệt luôn nhận public URL, còn bước đổi code vẫn gọi Keycloak nội bộ.
   getSocialAuthUrl(provider: string): { authUrl: string; state: string } {
     // Tạo state ngẫu nhiên để chống CSRF trong flow social login.
     // State này sẽ được lưu tạm thời trong socialStateStore với thông tin provider và thời gian hết hạn.
@@ -225,9 +229,10 @@ export class AuthService {
       if (val.expiresAt < Date.now()) this.socialStateStore.delete(key);
     }
 
-    const keycloakUrl = this.config.get<string>(
-      "KEYCLOAK_URL",
-      "http://keycloak:8080",
+    // Không dùng KEYCLOAK_URL cho redirect vì hostname `keycloak` chỉ tồn tại trong Docker network.
+    const keycloakPublicUrl = this.config.get<string>(
+      "KEYCLOAK_PUBLIC_URL",
+      "http://localhost:8080",
     );
     const realm = this.config.get<string>("KEYCLOAK_REALM", "");
     const clientId = this.config.get<string>(
@@ -237,7 +242,7 @@ export class AuthService {
     const redirectUri = this.getSocialCallbackUrl();
 
     const authUrl =
-      `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth` +
+      `${keycloakPublicUrl}/realms/${realm}/protocol/openid-connect/auth` +
       `?client_id=${clientId}` +
       `&response_type=code` +
       `&scope=openid email profile` +
@@ -414,7 +419,10 @@ export class AuthService {
   }
 
   // Trả viewer hiện tại từ access token context mà không xoay refresh token, phù hợp cho các màn hình chỉ cần đọc lại quyền/profile.
-  async getViewer(keycloakId: string, tokenRoles: string[] = []): Promise<AuthUserResponse> {
+  async getViewer(
+    keycloakId: string,
+    tokenRoles: string[] = [],
+  ): Promise<AuthUserResponse> {
     const user = await this.userRepo.findOne({ where: { keycloakId } });
     if (!user) throw new NotFoundException("User not found");
     return this.toAuthUser(user, undefined, tokenRoles);
@@ -625,7 +633,10 @@ export class AuthService {
     sessionId: string,
     rawRefreshToken?: string,
   ): Promise<void> {
-    const { user } = await this.resolveSessionOwner(keycloakId, rawRefreshToken);
+    const { user } = await this.resolveSessionOwner(
+      keycloakId,
+      rawRefreshToken,
+    );
 
     const session = await this.refreshTokenRepo.findOne({
       where: { id: sessionId, userId: user.id, revokedAt: IsNull() },
@@ -669,7 +680,10 @@ export class AuthService {
     keycloakId: string,
     rawRefreshToken?: string,
   ): Promise<number> {
-    const { user } = await this.resolveSessionOwner(keycloakId, rawRefreshToken);
+    const { user } = await this.resolveSessionOwner(
+      keycloakId,
+      rawRefreshToken,
+    );
 
     const result = await this.refreshTokenRepo
       .createQueryBuilder()
@@ -689,7 +703,11 @@ export class AuthService {
     clientId?: string,
     loginMethod?: string,
   ): Promise<RefreshToken> {
-    const metadata = this.parseSessionMetadata(userAgent, loginMethod, clientId);
+    const metadata = this.parseSessionMetadata(
+      userAgent,
+      loginMethod,
+      clientId,
+    );
     const record = this.refreshTokenRepo.create({
       userId,
       tokenHash: this.tokenService.hashToken(rawToken),
@@ -707,7 +725,9 @@ export class AuthService {
   private shouldRevokeAllSessionsOnRefreshReuse(
     stored: RefreshToken | null,
   ): stored is RefreshToken {
-    return Boolean(stored?.revokedAt && stored.revokedReason === "TOKEN_ROTATED");
+    return Boolean(
+      stored?.revokedAt && stored.revokedReason === "TOKEN_ROTATED",
+    );
   }
 
   // Tách thông tin thiết bị từ user-agent để lưu sẵn vào session, giúp UI không phải đoán toàn bộ ở client.
@@ -768,7 +788,9 @@ export class AuthService {
     currentSessionId?: string,
     currentUserAgent?: string,
   ): SessionResponseDto {
-    const isCurrent = currentSessionId ? session.id === currentSessionId : false;
+    const isCurrent = currentSessionId
+      ? session.id === currentSessionId
+      : false;
     const fallbackMetadata =
       isCurrent && (!session.browser || !session.os) && currentUserAgent
         ? this.parseSessionMetadata(
@@ -781,11 +803,15 @@ export class AuthService {
     return {
       id: session.id,
       deviceName:
-        session.deviceName ?? fallbackMetadata?.deviceName ?? "Thiết bị không rõ",
-      deviceType: session.deviceType ?? fallbackMetadata?.deviceType ?? "desktop",
+        session.deviceName ??
+        fallbackMetadata?.deviceName ??
+        "Thiết bị không rõ",
+      deviceType:
+        session.deviceType ?? fallbackMetadata?.deviceType ?? "desktop",
       browser: session.browser ?? fallbackMetadata?.browser ?? "Không rõ",
       os: session.os ?? fallbackMetadata?.os ?? "Không rõ",
-      loginMethod: session.loginMethod ?? (session.clientId ? "google" : "password"),
+      loginMethod:
+        session.loginMethod ?? (session.clientId ? "google" : "password"),
       ipAddress: session.ipAddress,
       location: session.location,
       userAgent: session.userAgent,
@@ -858,13 +884,11 @@ export class AuthService {
   private extractTokenRoles(accessToken?: string): string[] {
     if (!accessToken) return [];
 
-    const payload = jwt.decode(accessToken) as
-      | {
-          roles?: string[];
-          realm_access?: { roles?: string[] };
-          resource_access?: Record<string, { roles?: string[] }>;
-        }
-      | null;
+    const payload = jwt.decode(accessToken) as {
+      roles?: string[];
+      realm_access?: { roles?: string[] };
+      resource_access?: Record<string, { roles?: string[] }>;
+    } | null;
     if (!payload) return [];
 
     return [
