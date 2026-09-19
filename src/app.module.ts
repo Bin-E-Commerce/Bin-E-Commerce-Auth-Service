@@ -30,7 +30,7 @@ import { HealthModule } from "./modules/health/health.module";
         migrations: [__dirname + "/database/migrations/*{.ts,.js}"], // Cấu hình để TypeORM tự động tìm kiếm tất cả các file entity và migration trong thư mục database.
         synchronize: config.get<string>("NODE_ENV") !== "production",
         ssl:
-          config.get<string>("NODE_ENV") === "production"
+          config.get<string>("POSTGRES_SSL", "false") === "true"
             ? { rejectUnauthorized: false }
             : false,
         logging: config.get<string>("NODE_ENV") === "development",

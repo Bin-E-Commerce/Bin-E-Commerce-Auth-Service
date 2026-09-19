@@ -14,15 +14,21 @@ export const REDIS_CLIENT = "REDIS_CLIENT";
       provide: REDIS_CLIENT,
       inject: [ConfigService],
       useFactory: (config: ConfigService): Redis => {
-        return new Redis({
-          host: config.get<string>("REDIS_HOST", "localhost"),
-          port: config.get<number>("REDIS_PORT", 6379),
-          password: config.get<string>("REDIS_PASSWORD") || undefined,
+        // Dùng URL managed Redis khi có; local vẫn giữ cơ chế host/port cũ.
+        const redisUrl = config.get<string>("REDIS_URL")?.trim();
+        const options = {
           db: config.get<number>("REDIS_DB", 0),
-          lazyConnect: true, // Lazy connect là một tùy chọn để trì hoãn việc kết nối đến Redis cho đến khi client thực sự cần sử dụng,
-          // Giúp giảm thiểu thời gian khởi động của ứng dụng và tránh kết nối không cần thiết nếu Redis không được sử dụng ngay lập tức.
-          maxRetriesPerRequest: 3, // Giới hạn số lần thử lại khi có lỗi kết nối hoặc lỗi mạng, giúp cải thiện độ ổn định của ứng dụng khi gặp sự cố với Redis.
-        });
+          lazyConnect: true,
+          maxRetriesPerRequest: 3,
+        };
+        return redisUrl
+          ? new Redis(redisUrl, options)
+          : new Redis({
+              host: config.get<string>("REDIS_HOST", "localhost"),
+              port: config.get<number>("REDIS_PORT", 6379),
+              password: config.get<string>("REDIS_PASSWORD") || undefined,
+              ...options,
+            });
       },
     },
   ],
