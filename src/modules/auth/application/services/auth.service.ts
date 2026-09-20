@@ -36,9 +36,23 @@ import {
 import { SessionResponseDto } from "../../../users/presentation/dto/session-response.dto";
 import { AccessControlService } from "../../../access-control/application/services/access-control.service";
 
+type RefreshAuthResult = {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  refreshExpiresIn: number;
+  sessionId: string;
+  user: AuthUserResponse;
+};
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  // Auth Service hiện chạy một replica; khóa theo token ngăn hai request cùng xoay một refresh token.
+  private readonly refreshInFlight = new Map<
+    string,
+    Promise<RefreshAuthResult>
+  >();
 
   // Dùng để tạm lưu state của social login flow, tránh CSRF. Cấu trúc: state => { provider, expiresAt }
   private readonly socialStateStore = new Map<
@@ -354,7 +368,34 @@ export class AuthService {
 
   // ─────────────────────────────── REFRESH ─────────────────────────────────
 
+  // Điều phối refresh theo hash để hai request đồng thời dùng chung một lần rotate.
   async refresh(
+    rawRefreshToken: string,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<RefreshAuthResult> {
+    const hash = this.tokenService.hashToken(rawRefreshToken);
+    const existingRefresh = this.refreshInFlight.get(hash);
+    if (existingRefresh) return existingRefresh;
+
+    const refreshOperation = this.refreshUnsafe(
+      rawRefreshToken,
+      ip,
+      userAgent,
+    );
+    this.refreshInFlight.set(hash, refreshOperation);
+
+    try {
+      return await refreshOperation;
+    } finally {
+      if (this.refreshInFlight.get(hash) === refreshOperation) {
+        this.refreshInFlight.delete(hash);
+      }
+    }
+  }
+
+  // Thực hiện một lần rotate refresh token sau khi đã qua khóa điều phối phía trên.
+  private async refreshUnsafe(
     rawRefreshToken: string, // Token gốc từ client gửi lên
     ip?: string, // Địa chỉ IP của client, dùng để lưu thông tin phiên đăng nhập và hỗ trợ các tính năng bảo mật như phát hiện token bị lộ.
     userAgent?: string, // User agent của client, cũng dùng để lưu thông tin phiên đăng nhập và hỗ trợ các tính năng bảo mật.
