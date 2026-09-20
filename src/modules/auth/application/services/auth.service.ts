@@ -192,6 +192,10 @@ export class AuthService {
     // Nếu thất bại sẽ ném lỗi UnauthorizedException.
     const tokens = await this.tokenService.issueTokenPair(email, dto.password);
 
+    // Đồng bộ lại liên kết local user với subject hiện tại của Keycloak.
+    // Realm hoặc user production có thể được tạo lại, khiến keycloakId cũ trong PostgreSQL lệch với sub mới.
+    await this.syncKeycloakIdentity(user, tokens.accessToken);
+
     // Cập nhật lastLoginAt và lưu refresh token vào DB local để quản lý phiên đăng nhập,
     // hỗ trợ revoke khi cần thiết, và phục vụ cho các tính năng bảo mật như phát hiện token bị lộ.
     await this.userRepo.update(user.id, { lastLoginAt: new Date() });
@@ -419,6 +423,44 @@ export class AuthService {
   }
 
   // Trả viewer hiện tại từ access token context mà không xoay refresh token, phù hợp cho các màn hình chỉ cần đọc lại quyền/profile.
+  // Kiểm tra token vừa cấp thuộc đúng email đang đăng nhập rồi sửa mapping Keycloak bị lệch.
+  // Không cho phép gán một subject đã thuộc user local khác để tránh chiếm nhầm danh tính.
+  private async syncKeycloakIdentity(
+    user: User,
+    accessToken: string,
+  ): Promise<void> {
+    const payload = jwt.decode(accessToken);
+    if (!payload || typeof payload === "string") {
+      throw new UnauthorizedException("Invalid credentials");
+    }
+
+    const subject = typeof payload.sub === "string" ? payload.sub : "";
+    const tokenEmail =
+      typeof payload.email === "string" ? payload.email.toLowerCase() : "";
+    if (!subject || (tokenEmail && tokenEmail !== user.email.toLowerCase())) {
+      throw new UnauthorizedException("Invalid credentials");
+    }
+
+    if (user.keycloakId === subject) return;
+
+    const existingUser = await this.userRepo.findOne({
+      where: { keycloakId: subject },
+      select: ["id"],
+    });
+    if (existingUser && existingUser.id !== user.id) {
+      this.logger.error(
+        `Keycloak subject ${subject} is already linked to another local user`,
+      );
+      throw new UnauthorizedException("Invalid credentials");
+    }
+
+    user.keycloakId = subject;
+    await this.userRepo.save(user);
+    this.logger.warn(
+      `Repaired Keycloak identity mapping for local user ${user.id}`,
+    );
+  }
+
   async getViewer(
     keycloakId: string,
     tokenRoles: string[] = [],
