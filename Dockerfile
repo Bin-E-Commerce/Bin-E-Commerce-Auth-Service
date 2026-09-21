@@ -30,6 +30,9 @@ RUN npm prune --omit=dev
 # Giai đoạn runtime không chứa compiler, test hoặc source TypeScript.
 FROM node:20-alpine AS production
 
+# Update Alpine packages so the runtime receives current security fixes.
+RUN apk upgrade --no-cache
+
 # Giá trị mặc định cho chạy image độc lập; Compose/Kubernetes có thể override PORT.
 ENV NODE_ENV=production
 ENV PORT=3002
