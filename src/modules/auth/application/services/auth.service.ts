@@ -378,11 +378,7 @@ export class AuthService {
     const existingRefresh = this.refreshInFlight.get(hash);
     if (existingRefresh) return existingRefresh;
 
-    const refreshOperation = this.refreshUnsafe(
-      rawRefreshToken,
-      ip,
-      userAgent,
-    );
+    const refreshOperation = this.refreshUnsafe(rawRefreshToken, ip, userAgent);
     this.refreshInFlight.set(hash, refreshOperation);
 
     try {
@@ -503,10 +499,10 @@ export class AuthService {
   }
 
   async getViewer(
-    keycloakId: string,
+    identity: string,
     tokenRoles: string[] = [],
   ): Promise<AuthUserResponse> {
-    const user = await this.userRepo.findOne({ where: { keycloakId } });
+    const user = await this.findUserByIdentity(identity);
     if (!user) throw new NotFoundException("User not found");
     return this.toAuthUser(user, undefined, tokenRoles);
   }
@@ -595,12 +591,12 @@ export class AuthService {
 
   // Đổi mật khẩu cho người dùng đang đăng nhập, tạo phiên mới và thu hồi các phiên cũ để tránh refresh trang bị logout.
   async changePassword(
-    keycloakId: string,
+    identity: string,
     dto: ChangePasswordDto,
     ip?: string,
     userAgent?: string,
   ): Promise<AuthResponse> {
-    const user = await this.userRepo.findOne({ where: { keycloakId } });
+    const user = await this.findUserByIdentity(identity);
     if (!user) throw new NotFoundException("User not found");
     if (user.status !== UserStatus.ACTIVE)
       throw new UnauthorizedException("Account is inactive or banned");
@@ -908,7 +904,7 @@ export class AuthService {
 
   // Xác định local user đang thao tác bằng refresh token trước, vì đây là bản ghi phiên thật đang nằm trong cookie trình duyệt.
   private async resolveSessionOwner(
-    keycloakId: string,
+    identity: string,
     rawRefreshToken?: string,
   ): Promise<{ user: User; currentSession?: RefreshToken }> {
     if (rawRefreshToken) {
@@ -924,9 +920,17 @@ export class AuthService {
       }
     }
 
-    const user = await this.userRepo.findOne({ where: { keycloakId } });
+    const user = await this.findUserByIdentity(identity);
     if (!user) throw new NotFoundException("User not found");
     return { user };
+  }
+
+  // Hỗ trợ cả Keycloak sub và local user.id vì request nội bộ từ Gateway dùng local ID,
+  // còn contract resolve viewer giữa Gateway và Auth Service dùng Keycloak sub.
+  private async findUserByIdentity(identity: string): Promise<User | null> {
+    return this.userRepo.findOne({
+      where: [{ id: identity }, { keycloakId: identity }],
+    });
   }
 
   // Chuyển user nội bộ sang viewer trả cho FE, kèm accessProfile để UI render theo dữ liệu backend.

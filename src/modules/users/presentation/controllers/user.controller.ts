@@ -27,7 +27,7 @@ export class UserController {
 
   @Get("me")
   async getProfile(@Headers("x-user-id") userId: string) {
-    const user = await this.userService.getProfile(userId);
+    const user = await this.userService.getProfileByLocalId(userId);
     return {
       data: await this.toUserResponse(user),
       message: "Profile retrieved",
@@ -91,7 +91,10 @@ export class UserController {
     @Headers("x-user-id") userId: string,
     @Headers("x-session-id") currentSessionId?: string,
   ) {
-    const sessions = await this.userService.getSessions(userId, currentSessionId);
+    const sessions = await this.userService.getSessions(
+      userId,
+      currentSessionId,
+    );
     return { data: sessions, message: "Sessions retrieved", statusCode: 200 };
   }
 
@@ -101,8 +104,15 @@ export class UserController {
     @Headers("x-user-id") userId: string,
     @Headers("x-session-id") currentSessionId: string,
   ) {
-    const revokedCount = await this.userService.revokeOtherSessions(userId, currentSessionId);
-    return { data: { revokedCount }, message: "Other sessions revoked", statusCode: 200 };
+    const revokedCount = await this.userService.revokeOtherSessions(
+      userId,
+      currentSessionId,
+    );
+    return {
+      data: { revokedCount },
+      message: "Other sessions revoked",
+      statusCode: 200,
+    };
   }
 
   @Delete("me/sessions/:id")

@@ -37,8 +37,13 @@ export class UserService {
   ) {}
 
   // Lấy hoạt động gần nhất từ refresh session còn hiệu lực, fallback về lần đăng nhập cuối nếu chưa có activity detail.
-  async getPublicActivity(userId: string): Promise<{ lastActiveAt: Date | null }> {
-    const user = await this.userRepo.findOne({ where: { keycloakId: userId }, select: ["id", "lastLoginAt"] });
+  async getPublicActivity(
+    userId: string,
+  ): Promise<{ lastActiveAt: Date | null }> {
+    const user = await this.userRepo.findOne({
+      where: { keycloakId: userId },
+      select: ["id", "lastLoginAt"],
+    });
     if (!user) throw new NotFoundException("User not found");
     const session = await this.refreshTokenRepo
       .createQueryBuilder("session")
@@ -54,11 +59,11 @@ export class UserService {
 
   // ─────────────────────────────── HELPERS ──────────────────────────────────
 
-  // x-user-id từ JWT gateway = Keycloak sub (keycloakId), KHÁC với user.id (PostgreSQL UUID).
-  // Hàm này resolve keycloakId → local user.id để dùng trong các query trên bảng liên quan.
-  private async resolveUserId(keycloakId: string): Promise<string> {
+  // Các service phía sau API Gateway nhận x-user-id là user.id nội bộ của Auth DB.
+  // Resolve lại bản ghi trước khi truy cập address/session để giữ ownership theo cùng một namespace.
+  private async resolveLocalUserId(localUserId: string): Promise<string> {
     const user = await this.userRepo.findOne({
-      where: { keycloakId },
+      where: { id: localUserId },
       select: ["id"],
     });
     if (!user) throw new NotFoundException("User not found");
@@ -67,9 +72,16 @@ export class UserService {
 
   // ─────────────────────────────── PROFILE ─────────────────────────────────
 
-  async getProfile(userId: string): Promise<User> {
-    // userId = keycloakId (Keycloak sub từ JWT), query bằng keycloakId thay vì id local
-    const user = await this.userRepo.findOne({ where: { keycloakId: userId } });
+  // Lấy profile của user hiện tại từ x-user-id do API Gateway đã chuẩn hóa thành local user.id.
+  async getProfileByLocalId(localUserId: string): Promise<User> {
+    const user = await this.userRepo.findOne({ where: { id: localUserId } });
+    if (!user) throw new NotFoundException("User not found");
+    return user;
+  }
+
+  // Lấy profile theo Keycloak sub cho các contract nội bộ truyền identity của Keycloak.
+  async getProfileByKeycloakId(keycloakId: string): Promise<User> {
+    const user = await this.userRepo.findOne({ where: { keycloakId } });
     if (!user) throw new NotFoundException("User not found");
     return user;
   }
@@ -98,7 +110,9 @@ export class UserService {
 
   // Trả projection tài khoản tối thiểu cho Recommendation Admin; chỉ internal service mới được đọc email/số điện thoại.
   async getRecommendationProfiles(search?: string, keycloakIds: string[] = []) {
-    const normalizedIds = [...new Set(keycloakIds.map((id) => id.trim()).filter(Boolean))].slice(0, 100);
+    const normalizedIds = [
+      ...new Set(keycloakIds.map((id) => id.trim()).filter(Boolean)),
+    ].slice(0, 100);
     const normalizedSearch = search?.trim();
     const query = this.userRepo
       .createQueryBuilder("user")
@@ -137,7 +151,7 @@ export class UserService {
 
   // Cập nhật các trường hồ sơ công khai; avatar được tách sang luồng nội bộ do Media Service xác nhận.
   async updateProfile(userId: string, dto: UpdateProfileDto): Promise<User> {
-    const user = await this.getProfile(userId);
+    const user = await this.getProfileByLocalId(userId);
     if (dto.name !== undefined) user.name = dto.name;
     if (dto.phone !== undefined) user.phone = dto.phone;
     return this.userRepo.save(user);
@@ -151,7 +165,7 @@ export class UserService {
     user: User;
     oldAvatarUrl: string | null;
   }> {
-    const user = await this.getProfile(userId);
+    const user = await this.getProfileByLocalId(userId);
     const oldAvatarUrl = user.avatarUrl;
     user.avatarUrl = avatarUrl;
     const updatedUser = await this.userRepo.save(user);
@@ -165,7 +179,7 @@ export class UserService {
   // ─────────────────────────────── ADDRESSES ───────────────────────────────
 
   async listAddresses(userId: string): Promise<UserAddress[]> {
-    const localId = await this.resolveUserId(userId);
+    const localId = await this.resolveLocalUserId(userId);
     return this.addressRepo.find({
       where: { userId: localId },
       order: { isDefault: "DESC", createdAt: "ASC" },
@@ -176,7 +190,7 @@ export class UserService {
     userId: string,
     dto: CreateAddressDto,
   ): Promise<UserAddress> {
-    const localId = await this.resolveUserId(userId);
+    const localId = await this.resolveLocalUserId(userId);
     const count = await this.addressRepo.count({ where: { userId: localId } });
     // Giới hạn số lượng địa chỉ mà một người dùng có thể tạo để tránh spam và quản lý dễ dàng hơn.
     // Nếu đã đạt giới hạn, trả về lỗi 422 Unprocessable Entity.
@@ -205,7 +219,7 @@ export class UserService {
     addressId: string,
     dto: UpdateAddressDto,
   ): Promise<UserAddress> {
-    const localId = await this.resolveUserId(userId);
+    const localId = await this.resolveLocalUserId(userId);
     const address = await this.addressRepo.findOne({
       where: { id: addressId, userId: localId },
     });
@@ -253,7 +267,7 @@ export class UserService {
   }
 
   async deleteAddress(userId: string, addressId: string): Promise<void> {
-    const localId = await this.resolveUserId(userId);
+    const localId = await this.resolveLocalUserId(userId);
     const address = await this.addressRepo.findOne({
       where: { id: addressId, userId: localId },
     });
@@ -280,7 +294,7 @@ export class UserService {
     userId: string,
     currentSessionId?: string,
   ): Promise<SessionResponseDto[]> {
-    const localId = await this.resolveUserId(userId);
+    const localId = await this.resolveLocalUserId(userId);
     const now = new Date();
     const tokens = await this.refreshTokenRepo.find({
       where: { userId: localId, revokedAt: IsNull() },
@@ -297,7 +311,7 @@ export class UserService {
     userId: string,
     addressId: string,
   ): Promise<UserAddress> {
-    const localId = await this.resolveUserId(userId);
+    const localId = await this.resolveLocalUserId(userId);
     const address = await this.addressRepo.findOne({
       where: { id: addressId, userId: localId },
     });
@@ -311,7 +325,7 @@ export class UserService {
     sessionId: string,
     currentSessionId?: string,
   ): Promise<void> {
-    const localId = await this.resolveUserId(userId);
+    const localId = await this.resolveLocalUserId(userId);
     const session = await this.refreshTokenRepo.findOne({
       where: { id: sessionId, userId: localId, revokedAt: IsNull() },
     });
@@ -333,7 +347,7 @@ export class UserService {
     userId: string,
     currentSessionId: string,
   ): Promise<number> {
-    const localId = await this.resolveUserId(userId);
+    const localId = await this.resolveLocalUserId(userId);
     const result = await this.refreshTokenRepo
       .createQueryBuilder()
       .update(RefreshToken)
@@ -393,7 +407,7 @@ export class UserService {
       throw new ForbiddenException("Cannot change your own role");
     }
 
-    const user = await this.getProfile(targetId);
+    const user = await this.getProfileByLocalId(targetId);
     const oldRole = user.role;
 
     await this.keycloakAdmin.removeRealmRole(user.keycloakId, oldRole);
@@ -416,7 +430,7 @@ export class UserService {
       throw new ForbiddenException("Cannot change your own status");
     }
 
-    const user = await this.getProfile(targetId);
+    const user = await this.getProfileByLocalId(targetId);
     const enabled = newStatus === UserStatus.ACTIVE;
 
     await this.keycloakAdmin.setUserEnabled(user.keycloakId, enabled);

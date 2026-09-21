@@ -56,7 +56,7 @@ export class InternalUserController {
   // Trả email của user theo keycloakId cho service nội bộ gửi thông báo; caller không được đọc thêm profile hoặc credential.
   @Get(":userId/email")
   async getUserEmail(@Param("userId") userId: string) {
-    const user = await this.userService.getProfile(userId);
+    const user = await this.userService.getProfileByKeycloakId(userId);
     return { email: user.email };
   }
 
