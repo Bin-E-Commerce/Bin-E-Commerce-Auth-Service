@@ -35,7 +35,11 @@ ENV NODE_ENV=production
 ENV PORT=3002
 
 # Chạy service bằng user không có quyền root để giới hạn tác động khi process gặp sự cố.
-RUN addgroup -g 1001 -S nodejs && adduser -S nestjs -u 1001
+# npm/npx chỉ cần ở builder để cài dependency; runtime chỉ chạy bằng node.
+# Loại chúng khỏi final image để không mang theo dependency/tooling không cần thiết của npm.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+  && addgroup -g 1001 -S nodejs \
+  && adduser -S nestjs -u 1001
 
 WORKDIR /app
 
