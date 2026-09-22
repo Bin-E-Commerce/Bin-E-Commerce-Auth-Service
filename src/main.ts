@@ -1,3 +1,6 @@
+// File này khởi động Auth Service, cấu hình OIDC-facing HTTP boundary và telemetry.
+// File không xử lý access rule; guard, strategy và application service giữ trách nhiệm đó.
+
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe, VersioningType } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -7,7 +10,9 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
 import { buildHelmetOptions } from "./common/config/helmet.config";
+import { setupHttpObservability } from "../../../packages/common/observability/http-observability";
 
+// Khởi động auth boundary và đăng ký middleware cross-cutting trước khi nhận traffic.
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
     logger: ["error", "warn", "log"],
@@ -48,6 +53,8 @@ async function bootstrap(): Promise<void> {
 
   // Global prefix
   app.setGlobalPrefix("api");
+  // Đăng ký metrics RED và request ID trước khi service bắt đầu nhận traffic.
+  setupHttpObservability(app, "auth-service");
 
   // URI versioning — /api/v1/auth/...
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: "1" });
