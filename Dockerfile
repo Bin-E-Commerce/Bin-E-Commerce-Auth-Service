@@ -15,7 +15,9 @@ COPY packages/common ./packages/common
 # npm ci dùng đúng version trong lockfile. DevDependency như Nest CLI và TypeScript
 # cần tồn tại ở build stage nhưng sẽ bị loại khỏi image runtime sau khi compile.
 # Tắt lifecycle script để build không tự chạy hành vi ngoài phạm vi image.
-RUN npm ci --workspace=services/auth-service --include=dev --ignore-scripts
+ENV NODE_ENV=development
+RUN npm ci --workspace=services/auth-service --include=dev --bin-links=true --ignore-scripts \
+  && test -x node_modules/.bin/nest
 
 # Chỉ copy source Auth Service; các service khác không được đưa vào bước compile.
 COPY services/auth-service/src ./services/auth-service/src
