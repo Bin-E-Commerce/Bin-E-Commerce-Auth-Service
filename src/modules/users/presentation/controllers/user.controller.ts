@@ -11,7 +11,7 @@ import {
   HttpCode,
   HttpStatus,
 } from "@nestjs/common";
-import { UserService } from "../../application/services/user.service";
+import { UserService } from "../../application/services/user/user.service";
 import { UpdateProfileDto } from "../dto/update-profile.dto";
 import { CreateAddressDto } from "../dto/create-address.dto";
 import { UpdateAddressDto } from "../dto/update-address.dto";

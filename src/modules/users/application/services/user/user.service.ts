@@ -11,16 +11,16 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { In, Repository, IsNull } from "typeorm";
 
-import { User } from "../../../../database/entities/user.entity";
-import { UserAddress } from "../../../../database/entities/user-address.entity";
-import { RefreshToken } from "../../../../database/entities/refresh-token.entity";
+import { User } from "../../../../../database/entities/user.entity";
+import { UserAddress } from "../../../../../database/entities/user-address.entity";
+import { RefreshToken } from "../../../../../database/entities/refresh-token.entity";
 import { UserRole } from "@common/enums/user-role.enum";
 import { UserStatus } from "@common/enums/user-status.enum";
-import { KeycloakAdminService } from "../../../auth/application/services/keycloak-admin.service";
-import { UpdateProfileDto } from "../../presentation/dto/update-profile.dto";
-import { CreateAddressDto } from "../../presentation/dto/create-address.dto";
-import { UpdateAddressDto } from "../../presentation/dto/update-address.dto";
-import { SessionResponseDto } from "../../presentation/dto/session-response.dto";
+import { KeycloakAdminService } from "../../../../auth/application/services/keycloak-admin.service";
+import { UpdateProfileDto } from "../../../presentation/dto/update-profile.dto";
+import { CreateAddressDto } from "../../../presentation/dto/create-address.dto";
+import { UpdateAddressDto } from "../../../presentation/dto/update-address.dto";
+import { SessionResponseDto } from "../../../presentation/dto/session-response.dto";
 
 const MAX_ADDRESSES = 5;
 
@@ -431,9 +431,9 @@ export class UserService {
     }
 
     const user = await this.getProfileByLocalId(targetId);
-    const enabled = newStatus === UserStatus.ACTIVE;
-
-    await this.keycloakAdmin.setUserEnabled(user.keycloakId, enabled);
+    // Giữ identity Keycloak enabled để social broker luôn quay về web;
+    // Auth Service vẫn chặn BANNED bằng status local trước khi cấp session.
+    await this.keycloakAdmin.syncUserStatus(user.keycloakId, newStatus);
     user.status = newStatus;
     const updated = await this.userRepo.save(user);
 

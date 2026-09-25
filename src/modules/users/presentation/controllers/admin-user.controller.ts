@@ -1,73 +1,174 @@
 import {
-  Controller,
-  Get,
-  Put,
-  Param,
   Body,
+  Controller,
+  Delete,
+  Get,
   Headers,
-  Query,
+  Param,
   ParseUUIDPipe,
-  ParseIntPipe,
-  DefaultValuePipe,
+  Post,
+  Put,
+  Query,
+  Req,
 } from "@nestjs/common";
-import { UserService } from "../../application/services/user.service";
-import { UserRole } from "@common/enums/user-role.enum";
-import { UserStatus } from "@common/enums/user-status.enum";
-import { IsIn } from "class-validator";
-import { IsString } from "class-validator";
+import type { Request } from "express";
+import { AdminUserService } from "../../application/services/admin/admin-user.service";
+import { ListAdminUsersDto } from "../dto/list-admin-users.dto";
+import { RevokeAdminUserSessionDto } from "../dto/revoke-admin-user-session.dto";
+import { UpdateAdminUserRoleDto } from "../dto/update-admin-user-role.dto";
+import { UpdateAdminUserStatusDto } from "../dto/update-admin-user-status.dto";
 
-class UpdateRoleDto {
-  @IsString()
-  @IsIn(Object.values(UserRole))
-  role: UserRole;
-}
-
-class UpdateStatusDto {
-  @IsString()
-  @IsIn(Object.values(UserStatus))
-  status: UserStatus;
-}
-
-// API quản lý user dành cho admin.
-// API Gateway đã chặn bằng @RequirePermissions(admin.access), service này chỉ nhận request có user context hợp lệ.
+// Controller chỉ nhận identity do Gateway inject; quyền ADMIN được xác minh lại từ local database trong service.
 @Controller("admin/users")
 export class AdminUserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(private readonly adminUserService: AdminUserService) {}
 
   @Get()
-  async listUsers(
-    @Query("page", new DefaultValuePipe(1), ParseIntPipe) page: number,
-    @Query("limit", new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  async list(
+    @Headers("x-user-id") actorId: string,
+    @Query() query: ListAdminUsersDto,
   ) {
-    const result = await this.userService.listUsers(page, Math.min(limit, 100));
-    return { data: result, message: "Users retrieved", statusCode: 200 };
+    await this.authorize(actorId);
+    return {
+      data: await this.adminUserService.listUsers(query),
+      message: "Users retrieved",
+      statusCode: 200,
+    };
+  }
+
+  @Get(":id")
+  async detail(
+    @Headers("x-user-id") actorId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    await this.authorize(actorId);
+    return {
+      data: await this.adminUserService.getUser(id),
+      message: "User retrieved",
+      statusCode: 200,
+    };
+  }
+
+  @Get(":id/sessions")
+  async sessions(
+    @Headers("x-user-id") actorId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    await this.authorize(actorId);
+    return {
+      data: await this.adminUserService.getSessions(id),
+      message: "Sessions retrieved",
+      statusCode: 200,
+    };
+  }
+
+  @Get(":id/audit")
+  async audit(
+    @Headers("x-user-id") actorId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    await this.authorize(actorId);
+    return {
+      data: await this.adminUserService.getAudit(id),
+      message: "Audit retrieved",
+      statusCode: 200,
+    };
   }
 
   @Put(":id/role")
   async updateRole(
-    @Headers("x-user-id") requesterId: string,
-    @Param("id", ParseUUIDPipe) targetId: string,
-    @Body() dto: UpdateRoleDto,
+    @Headers("x-user-id") actorId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: UpdateAdminUserRoleDto,
+    @Req() req: Request,
   ) {
-    const user = await this.userService.adminUpdateRole(
-      requesterId,
-      targetId,
-      dto.role,
-    );
-    return { data: user, message: "Role updated", statusCode: 200 };
+    await this.authorize(actorId);
+    return {
+      data: await this.adminUserService.updateRole(
+        actorId,
+        id,
+        dto,
+        this.context(req),
+      ),
+      message: "Role updated",
+      statusCode: 200,
+    };
   }
 
   @Put(":id/status")
   async updateStatus(
-    @Headers("x-user-id") requesterId: string,
-    @Param("id", ParseUUIDPipe) targetId: string,
-    @Body() dto: UpdateStatusDto,
+    @Headers("x-user-id") actorId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: UpdateAdminUserStatusDto,
+    @Req() req: Request,
   ) {
-    const user = await this.userService.adminUpdateStatus(
-      requesterId,
-      targetId,
-      dto.status,
-    );
-    return { data: user, message: "Status updated", statusCode: 200 };
+    await this.authorize(actorId);
+    return {
+      data: await this.adminUserService.updateStatus(
+        actorId,
+        id,
+        dto,
+        this.context(req),
+      ),
+      message: "Status updated",
+      statusCode: 200,
+    };
+  }
+
+  @Delete(":id/sessions/:sessionId")
+  async revokeSession(
+    @Headers("x-user-id") actorId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("sessionId", ParseUUIDPipe) sessionId: string,
+    @Body() dto: RevokeAdminUserSessionDto,
+    @Req() req: Request,
+  ) {
+    await this.authorize(actorId);
+    return {
+      data: await this.adminUserService.revokeSession(
+        actorId,
+        id,
+        sessionId,
+        dto.reason,
+        this.context(req),
+      ),
+      message: "Session revoked",
+      statusCode: 200,
+    };
+  }
+
+  @Post(":id/sessions/revoke-all")
+  async revokeAllSessions(
+    @Headers("x-user-id") actorId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: RevokeAdminUserSessionDto,
+    @Req() req: Request,
+  ) {
+    await this.authorize(actorId);
+    return {
+      data: await this.adminUserService.revokeAllSessionsForAdmin(
+        actorId,
+        id,
+        dto.reason,
+        this.context(req),
+      ),
+      message: "All sessions revoked",
+      statusCode: 200,
+    };
+  }
+
+  private async authorize(actorId: string): Promise<void> {
+    await this.adminUserService.assertAdminActor(actorId);
+  }
+
+  private context(req: Request) {
+    return {
+      // Gateway đã chuẩn hóa req.ip; không tin x-forwarded-for do browser tự gửi.
+      ipAddress: req.ip ?? null,
+      userAgent:
+        typeof req.headers["user-agent"] === "string"
+          ? req.headers["user-agent"]
+          : null,
+    };
   }
 }
