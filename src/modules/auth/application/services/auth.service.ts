@@ -5,6 +5,7 @@ import {
   ConflictException,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { IsNull, Repository } from "typeorm";
@@ -200,7 +201,7 @@ export class AuthService {
     const user = await this.userRepo.findOne({ where: { email } });
     if (!user) throw new UnauthorizedException("Account not found");
     if (user.status !== UserStatus.ACTIVE)
-      throw new UnauthorizedException("Account is inactive or banned");
+      throw new UnauthorizedException("Account is banned");
 
     // Lấy token từ Keycloak bằng cách gọi token endpoint với Resource Owner Password Credentials Grant
     // Nếu thất bại sẽ ném lỗi UnauthorizedException.
@@ -233,7 +234,22 @@ export class AuthService {
   // ─────────────────────────────── SOCIAL ──────────────────────────────────
 
   // Tạo URL social login và state chống CSRF; trình duyệt luôn nhận public URL, còn bước đổi code vẫn gọi Keycloak nội bộ.
-  getSocialAuthUrl(provider: string): { authUrl: string; state: string } {
+  // Nếu frontend cung cấp email, kiểm tra BANNED trước khi redirect để lỗi được
+  // hiển thị trong web thay vì rơi vào trang lỗi mặc định của Keycloak.
+  async getSocialAuthUrl(
+    provider: string,
+    email?: string,
+  ): Promise<{ authUrl: string; state: string }> {
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (normalizedEmail) {
+      const existingUser = await this.userRepo.findOne({
+        where: { email: normalizedEmail },
+        select: ["id", "status"],
+      });
+      if (existingUser?.status === UserStatus.BANNED)
+        throw new ForbiddenException("Account is banned");
+    }
+
     // Tạo state ngẫu nhiên để chống CSRF trong flow social login.
     // State này sẽ được lưu tạm thời trong socialStateStore với thông tin provider và thời gian hết hạn.
     const state = randomUUID();
@@ -266,9 +282,20 @@ export class AuthService {
       `&scope=openid email profile` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&state=${state}` +
-      `&kc_idp_hint=${provider}`;
+      `&kc_idp_hint=${provider}` +
+      (normalizedEmail
+        ? `&login_hint=${encodeURIComponent(normalizedEmail)}`
+        : "");
 
     return { authUrl, state };
+  }
+
+  // Chuẩn hóa claim định danh thành email dùng để lookup local user;
+  // không suy diễn từ claim không phải chuỗi hoặc username không có dạng email.
+  private normalizeSocialEmail(value: unknown): string | undefined {
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim().toLowerCase();
+    return normalized.includes("@") ? normalized : undefined;
   }
 
   async socialCallback(
@@ -308,19 +335,27 @@ export class AuthService {
     // Decode id_token to get user info (no verification needed — Keycloak already validated)
     const idPayload = jwt.decode(tokens.idToken) as Record<string, unknown>;
     const keycloakId = idPayload["sub"] as string;
-    const email = (idPayload["email"] as string | undefined)?.toLowerCase();
+    // Google có thể không đưa email vào id_token của user Keycloak đã import cũ;
+    // ưu tiên email claim, fallback sang preferred_username và chỉ dùng giá trị có dạng email.
+    const emailClaim = this.normalizeSocialEmail(idPayload["email"]);
+    const usernameClaim = this.normalizeSocialEmail(
+      idPayload["preferred_username"],
+    );
     const name =
       (idPayload["name"] as string | undefined) ??
       (idPayload["preferred_username"] as string) ??
       "User";
 
-    if (!email)
+    // Upsert local user
+    let user = await this.userRepo.findOne({ where: { keycloakId } });
+    // User đã liên kết bằng keycloakId có thể đăng nhập an toàn dù token cũ thiếu email;
+    // local profile là nguồn email chính sau khi identity đã được xác minh bởi Keycloak.
+    const email = emailClaim ?? usernameClaim ?? user?.email;
+    if (!email && !user)
       throw new UnauthorizedException(
         "Email not provided by identity provider",
       );
 
-    // Upsert local user
-    let user = await this.userRepo.findOne({ where: { keycloakId } });
     if (!user) {
       user = await this.userRepo.findOne({ where: { email } });
       if (user) {
@@ -343,7 +378,7 @@ export class AuthService {
     }
 
     if (user.status !== UserStatus.ACTIVE)
-      throw new UnauthorizedException("Account is inactive or banned");
+      throw new UnauthorizedException("Account is banned");
 
     await this.userRepo.update(user.id, { lastLoginAt: new Date() });
     const session = await this.saveRefreshToken(
@@ -500,11 +535,14 @@ export class AuthService {
 
   async getViewer(
     identity: string,
-    tokenRoles: string[] = [],
+    _tokenRoles: string[] = [],
   ): Promise<AuthUserResponse> {
     const user = await this.findUserByIdentity(identity);
     if (!user) throw new NotFoundException("User not found");
-    return this.toAuthUser(user, undefined, tokenRoles);
+    if (user.status !== UserStatus.ACTIVE) {
+      throw new ForbiddenException("Tài khoản không còn hoạt động");
+    }
+    return this.toAuthUser(user);
   }
 
   // ─────────────────────────────── LOGOUT ──────────────────────────────────
@@ -570,7 +608,7 @@ export class AuthService {
     const user = await this.userRepo.findOne({ where: { email: identifier } });
     if (!user) throw new NotFoundException("User not found");
     if (user.status !== UserStatus.ACTIVE)
-      throw new UnauthorizedException("Account is inactive or banned");
+      throw new UnauthorizedException("Account is banned");
 
     // Đổi mật khẩu trong Keycloak
     await this.keycloakAdmin.resetUserPassword(
@@ -599,7 +637,7 @@ export class AuthService {
     const user = await this.findUserByIdentity(identity);
     if (!user) throw new NotFoundException("User not found");
     if (user.status !== UserStatus.ACTIVE)
-      throw new UnauthorizedException("Account is inactive or banned");
+      throw new UnauthorizedException("Account is banned");
 
     if (dto.currentPassword === dto.newPassword) {
       throw new BadRequestException(
@@ -938,14 +976,11 @@ export class AuthService {
   private async toAuthUser(
     user: User,
     accessToken?: string,
-    tokenRoles: string[] = [],
+    _tokenRoles: string[] = [],
   ): Promise<AuthUserResponse> {
     const { id, email, name, phone, role, status, avatarUrl, createdAt } = user;
-    const roles = this.mergeRoleCodes([
-      role,
-      ...tokenRoles,
-      ...this.extractTokenRoles(accessToken),
-    ]);
+    // Quyền động lấy từ DB; role cũ trong JWT chỉ còn giá trị xác thực chữ ký, không được giữ quyền sau mutation.
+    const roles = [role];
     const access = await this.accessControlService.buildViewerAccess(
       user,
       roles,

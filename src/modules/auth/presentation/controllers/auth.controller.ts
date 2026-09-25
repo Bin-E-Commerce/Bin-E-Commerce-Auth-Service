@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   UnauthorizedException,
+  Query,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 
@@ -20,6 +21,7 @@ import { RegisterVerifyDto } from "../dto/register-verify.dto";
 import { LoginDto } from "../dto/login.dto";
 import { RefreshDto } from "../dto/refresh.dto";
 import { SocialCallbackDto } from "../dto/social-callback.dto";
+import { SocialStartQueryDto } from "../dto/social-start-query.dto";
 import { ForgotPasswordDto } from "../dto/forgot-password.dto";
 import { ResetPasswordDto } from "../dto/reset-password.dto";
 import { ChangePasswordDto } from "../dto/change-password.dto";
@@ -145,8 +147,14 @@ export class AuthController {
   }
 
   @Get("social/start/:provider")
-  getSocialStart(@Param("provider") provider: string) {
-    const result = this.authService.getSocialAuthUrl(provider);
+  async getSocialStart(
+    @Param("provider") provider: string,
+    @Query() query: SocialStartQueryDto,
+  ) {
+    const result = await this.authService.getSocialAuthUrl(
+      provider,
+      query.email,
+    );
     return {
       data: result,
       message: "Social auth URL generated",
@@ -226,8 +234,9 @@ export class AuthController {
     // Danh sách phiên lấy theo refresh token cookie trước, header userId chỉ dùng làm ngữ cảnh xác thực dự phòng.
     if (!userId) throw new UnauthorizedException("Missing user context");
 
-    const rawRefreshToken =
-      (req?.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    const rawRefreshToken = (
+      req?.cookies as Record<string, string> | undefined
+    )?.[REFRESH_COOKIE];
     const sessions = await this.authService.listSessions(
       userId,
       currentSessionId,
@@ -247,8 +256,9 @@ export class AuthController {
     // Ưu tiên refresh token trong cookie để xác định đúng chủ phiên, vì header sessionId có thể cũ sau khi refresh token xoay vòng.
     if (!userId) throw new UnauthorizedException("Missing user context");
 
-    const rawRefreshToken =
-      (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    const rawRefreshToken = (
+      req.cookies as Record<string, string> | undefined
+    )?.[REFRESH_COOKIE];
     await this.authService.revokeSessionById(
       userId,
       sessionId,
@@ -267,8 +277,9 @@ export class AuthController {
     // Cookie refresh token là nguồn chính để giữ lại đúng phiên hiện tại; header chỉ là phương án dự phòng.
     if (!userId) throw new UnauthorizedException("Missing user context");
 
-    const rawRefreshToken =
-      (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    const rawRefreshToken = (
+      req.cookies as Record<string, string> | undefined
+    )?.[REFRESH_COOKIE];
     const revokedCount = await this.authService.revokeOtherSessions(
       userId,
       currentSessionId,
@@ -291,8 +302,9 @@ export class AuthController {
     // Logout tất cả phải thu hồi cả phiên hiện tại và xóa cookie refresh token trên trình duyệt.
     if (!userId) throw new UnauthorizedException("Missing user context");
 
-    const rawRefreshToken =
-      (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    const rawRefreshToken = (
+      req.cookies as Record<string, string> | undefined
+    )?.[REFRESH_COOKIE];
     const revokedCount = await this.authService.revokeAllSessions(
       userId,
       rawRefreshToken,

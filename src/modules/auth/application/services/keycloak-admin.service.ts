@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import axios from "axios";
+import { UserStatus } from "@common/enums/user-status.enum";
 
 // Mục đích của service này là để tương tác với Keycloak Admin API,
 // Thực hiện các thao tác quản lý người dùng như tạo user mới, gán role, v.v.
@@ -168,12 +169,18 @@ export class KeycloakAdminService {
     );
   }
 
-  // Kích hoạt hoặc vô hiệu hóa user trong Keycloak bằng cách cập nhật trường "enabled".
-  async setUserEnabled(keycloakId: string, enabled: boolean): Promise<void> {
+  // Đồng bộ trạng thái nghiệp vụ vào Keycloak nhưng luôn giữ identity enabled.
+  // Nếu đặt enabled=false cho BANNED, Google broker sẽ dừng trước callback và người dùng
+  // chỉ nhìn thấy trang lỗi mặc định của Keycloak. Local Auth Service mới là lớp quyết định
+  // quyền đăng nhập và truy cập; attribute này chỉ giúp Keycloak giữ metadata đồng bộ.
+  async syncUserStatus(keycloakId: string, status: UserStatus): Promise<void> {
     const token = await this.getAdminToken();
     await axios.put(
       `${this.keycloakUrl}/admin/realms/${this.realm}/users/${keycloakId}`,
-      { enabled },
+      {
+        enabled: true,
+        attributes: { binAccountStatus: [status] },
+      },
       { headers: { Authorization: `Bearer ${token}` } },
     );
   }

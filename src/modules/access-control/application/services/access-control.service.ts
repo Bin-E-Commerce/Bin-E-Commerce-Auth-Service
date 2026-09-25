@@ -63,7 +63,7 @@ export class AccessControlService {
   // Kết quả được cache theo userId + permissionVersion để tránh join nhiều bảng role/permission/navigation ở mọi request.
   async buildViewerAccess(
     user: User,
-    tokenRoles: string[] = [],
+    _tokenRoles: string[] = [],
   ): Promise<ViewerAccessDto> {
     const cached = await this.cache.get(
       user.id,
@@ -71,7 +71,7 @@ export class AccessControlService {
     );
     if (cached) return cached;
 
-    const roles = await this.resolveUserRoles(user, tokenRoles);
+    const roles = await this.resolveUserRoles(user);
     const grants = await this.resolvePermissionGrants(roles);
     const accessProfile = await this.buildAccessProfile(grants);
     const value = {
@@ -205,12 +205,8 @@ export class AccessControlService {
     );
   }
 
-  // Resolve role cuối cùng của user từ 3 nguồn: users.role cũ, role trong token và bảng user_role_assignments mới.
-  // DB assignment được dùng để admin cấp role linh hoạt, còn tokenRoles giúp tương thích khi Keycloak vẫn trả role cũ.
-  private async resolveUserRoles(
-    user: User,
-    tokenRoles: string[],
-  ): Promise<UserRole[]> {
+  // Resolve role từ local state; tokenRoles không được ưu tiên vì JWT cũ có thể còn hạn sau khi admin thu hồi quyền.
+  private async resolveUserRoles(user: User): Promise<UserRole[]> {
     const now = new Date();
     const assignments = await this.userRoleRepo.find({
       where: [
@@ -224,7 +220,7 @@ export class AccessControlService {
       .filter(Boolean);
 
     // normalizeBusinessRoles loại bỏ role kỹ thuật/role rác và trả về danh sách role nghiệp vụ hợp lệ của hệ thống.
-    return normalizeBusinessRoles([user.role, ...tokenRoles, ...assignedRoles]);
+    return normalizeBusinessRoles([user.role, ...assignedRoles]);
   }
 
   // Từ danh sách role, lấy các permission đang bật và merge nhiều scope của cùng một permission thành một grant duy nhất.
