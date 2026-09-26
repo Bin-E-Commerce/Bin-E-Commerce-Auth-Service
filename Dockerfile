@@ -9,7 +9,11 @@ WORKDIR /app
 # Copy manifest trước source để Docker cache layer dependency khi code thay đổi.
 # package chung được copy vì TypeScript của Auth Service dùng alias @common.
 COPY package.json package-lock.json tsconfig.base.json ./
-COPY services/auth-service/package.json services/auth-service/tsconfig.json ./services/auth-service/
+COPY services/auth-service/package.json \
+  services/auth-service/tsconfig.json \
+  services/auth-service/tsconfig.build.json \
+  services/auth-service/nest-cli.json \
+  ./services/auth-service/
 COPY packages/common ./packages/common
 
 # npm ci dùng đúng version trong lockfile. DevDependency như Nest CLI và TypeScript
