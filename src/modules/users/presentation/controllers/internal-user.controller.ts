@@ -2,105 +2,112 @@
 // Các endpoint đều yêu cầu internal token và không cho caller tự chọn user ngoài x-user-id.
 
 import {
-  Body,
-  Controller,
-  Get,
-  Headers,
-  Param,
-  ParseUUIDPipe,
-  Query,
-  Put,
-  UnauthorizedException,
-  UseGuards,
-} from "@nestjs/common";
-import { UpdateAvatarInternalDto } from "../dto/update-avatar-internal.dto";
-import { InternalServiceGuard } from "../guards/internal-service.guard";
-import { UserService } from "../../application/services/user/user.service";
+    Body,
+    Controller,
+    Get,
+    Headers,
+    Param,
+    ParseUUIDPipe,
+    Query,
+    Put,
+    UnauthorizedException,
+    UseGuards,
+} from '@nestjs/common';
+import { UpdateAvatarInternalDto } from '@/modules/users/presentation/dto/update-avatar-internal.dto';
+import { InternalServiceGuard } from '@/modules/users/presentation/guards/internal-service.guard';
+import { UserService } from '@/modules/users/application/services/user/user.service';
 
-@Controller("internal/users")
+@Controller('internal/users')
 @UseGuards(InternalServiceGuard)
 export class InternalUserController {
-  // Nhận UserService qua dependency injection để controller chỉ xử lý contract nội bộ.
-  constructor(private readonly userService: UserService) {}
+    // Nhận UserService qua dependency injection để controller chỉ xử lý contract nội bộ.
+    constructor(private readonly userService: UserService) {}
 
-  // Cập nhật avatar từ Media Service và trả URL cũ để service gọi có thể dọn file S3 tương ứng.
-  @Put("avatar")
-  async updateAvatar(
-    @Headers("x-user-id") userId: string | undefined,
-    @Body() dto: UpdateAvatarInternalDto,
-  ) {
-    if (!userId) {
-      throw new UnauthorizedException("Missing authenticated user context");
+    // Cập nhật avatar từ Media Service và trả URL cũ để service gọi có thể dọn file S3 tương ứng.
+    @Put('avatar')
+    async updateAvatar(
+        @Headers('x-user-id') userId: string | undefined,
+        @Body() dto: UpdateAvatarInternalDto,
+    ) {
+        if (!userId) {
+            throw new UnauthorizedException(
+                'Missing authenticated user context',
+            );
+        }
+
+        const result = await this.userService.updateAvatar(
+            userId,
+            dto.avatarUrl,
+        );
+
+        return {
+            data: result,
+            message: 'Avatar updated',
+            statusCode: 200,
+        };
     }
 
-    const result = await this.userService.updateAvatar(userId, dto.avatarUrl);
+    // Xác nhận địa chỉ thuộc user hiện tại rồi trả snapshot cho Order Service lưu bất biến.
+    @Get('addresses/:addressId')
+    async getOwnedAddress(
+        @Headers('x-user-id') userId: string | undefined,
+        @Param('addressId', new ParseUUIDPipe()) addressId: string,
+    ) {
+        if (!userId)
+            throw new UnauthorizedException(
+                'Missing authenticated user context',
+            );
+        return this.userService.getOwnedAddress(userId, addressId);
+    }
 
-    return {
-      data: result,
-      message: "Avatar updated",
-      statusCode: 200,
-    };
-  }
+    // Trả email của user theo keycloakId cho service nội bộ gửi thông báo; caller không được đọc thêm profile hoặc credential.
+    @Get(':userId/email')
+    async getUserEmail(@Param('userId') userId: string) {
+        const user = await this.userService.getProfileByKeycloakId(userId);
+        return { email: user.email };
+    }
 
-  // Xác nhận địa chỉ thuộc user hiện tại rồi trả snapshot cho Order Service lưu bất biến.
-  @Get("addresses/:addressId")
-  async getOwnedAddress(
-    @Headers("x-user-id") userId: string | undefined,
-    @Param("addressId", new ParseUUIDPipe()) addressId: string,
-  ) {
-    if (!userId)
-      throw new UnauthorizedException("Missing authenticated user context");
-    return this.userService.getOwnedAddress(userId, addressId);
-  }
+    // Trả về profile hiện thị tối thiểu cho danh sách review; endpoint chỉ mở cho service có internal token.
+    @Get('public-profiles')
+    async getPublicProfiles(@Query('ids') idsHeader?: string) {
+        const keycloakIds = (idsHeader ?? '')
+            .split(',')
+            .map((id) => id.trim())
+            .filter(Boolean)
+            .slice(0, 100);
 
-  // Trả email của user theo keycloakId cho service nội bộ gửi thông báo; caller không được đọc thêm profile hoặc credential.
-  @Get(":userId/email")
-  async getUserEmail(@Param("userId") userId: string) {
-    const user = await this.userService.getProfileByKeycloakId(userId);
-    return { email: user.email };
-  }
+        return {
+            data: await this.userService.getPublicProfiles(keycloakIds),
+            message: 'Public profiles retrieved',
+            statusCode: 200,
+        };
+    }
 
-  // Trả về profile hiện thị tối thiểu cho danh sách review; endpoint chỉ mở cho service có internal token.
-  @Get("public-profiles")
-  async getPublicProfiles(@Query("ids") idsHeader?: string) {
-    const keycloakIds = (idsHeader ?? "")
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean)
-      .slice(0, 100);
+    // Cung cấp dữ liệu account cho analytics nội bộ; email/số điện thoại không được mở qua public-profile contract.
+    @Get('recommendation-profiles')
+    async getRecommendationProfiles(
+        @Query('ids') idsHeader?: string,
+        @Query('search') search?: string,
+    ) {
+        const keycloakIds = (idsHeader ?? '')
+            .split(',')
+            .map((id) => id.trim())
+            .filter(Boolean)
+            .slice(0, 100);
 
-    return {
-      data: await this.userService.getPublicProfiles(keycloakIds),
-      message: "Public profiles retrieved",
-      statusCode: 200,
-    };
-  }
+        return {
+            data: await this.userService.getRecommendationProfiles(
+                search,
+                keycloakIds,
+            ),
+            message: 'Recommendation profiles retrieved',
+            statusCode: 200,
+        };
+    }
 
-  // Cung cấp dữ liệu account cho analytics nội bộ; email/số điện thoại không được mở qua public-profile contract.
-  @Get("recommendation-profiles")
-  async getRecommendationProfiles(
-    @Query("ids") idsHeader?: string,
-    @Query("search") search?: string,
-  ) {
-    const keycloakIds = (idsHeader ?? "")
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean)
-      .slice(0, 100);
-
-    return {
-      data: await this.userService.getRecommendationProfiles(
-        search,
-        keycloakIds,
-      ),
-      message: "Recommendation profiles retrieved",
-      statusCode: 200,
-    };
-  }
-
-  // Trả timestamp activity tối thiểu cho Seller hiển thị trạng thái online mà không làm lộ session hoặc token detail.
-  @Get(":userId/activity")
-  async getUserActivity(@Param("userId") userId: string) {
-    return this.userService.getPublicActivity(userId);
-  }
+    // Trả timestamp activity tối thiểu cho Seller hiển thị trạng thái online mà không làm lộ session hoặc token detail.
+    @Get(':userId/activity')
+    async getUserActivity(@Param('userId') userId: string) {
+        return this.userService.getPublicActivity(userId);
+    }
 }
