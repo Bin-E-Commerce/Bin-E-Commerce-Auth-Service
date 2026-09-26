@@ -103,7 +103,12 @@ export class AuthService {
             },
         );
 
-        await this.otpService.sendOtp(email, rawOtp, 'email');
+        await this.otpService.sendOtp(
+            email,
+            rawOtp,
+            OtpPurpose.REGISTER,
+            'email',
+        );
 
         return { message: 'OTP sent to your email', expiresIn: 600 };
     }
@@ -597,7 +602,7 @@ export class AuthService {
     async forgotPassword(
         dto: ForgotPasswordDto,
     ): Promise<{ message: string; expiresIn: number }> {
-        const email = dto.email.toLowerCase();
+        const email = dto.email.trim().toLowerCase();
 
         // Dùng thông báo mơ hồ để tránh email enumeration attack
         // Nếu email tồn tại và tài khoản đang ở trạng thái ACTIVE,
@@ -618,7 +623,12 @@ export class AuthService {
             OtpPurpose.RESET_PASSWORD,
         );
 
-        await this.otpService.sendOtp(email, rawOtp, 'email');
+        await this.otpService.sendOtp(
+            email,
+            rawOtp,
+            OtpPurpose.RESET_PASSWORD,
+            'email',
+        );
 
         return genericResponse;
     }
@@ -626,7 +636,7 @@ export class AuthService {
     // ─────────────────────────── RESET PASSWORD ──────────────────────────────
 
     async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
-        const identifier = dto.identifier.toLowerCase();
+        const identifier = dto.identifier.trim().toLowerCase();
 
         // Xác thực OTP — sẽ throw nếu OTP không hợp lệ/hết hạn
         await this.otpService.verifyOtp(

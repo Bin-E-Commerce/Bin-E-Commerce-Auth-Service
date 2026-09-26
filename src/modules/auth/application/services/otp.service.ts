@@ -125,9 +125,12 @@ export class OtpService {
             : null;
     }
 
+    // Phát OTP qua kênh được chọn và giữ nguyên purpose để Notification Service chọn đúng template.
+    // Purpose phải đi cùng challenge Redis; nếu gửi mặc định REGISTER, email reset sẽ hiển thị sai nội dung dù OTP vẫn hợp lệ.
     async sendOtp(
         identifier: string,
         code: string,
+        purpose: OtpPurpose,
         channel: 'email' | 'sms' = 'email',
     ): Promise<void> {
         if (process.env['NODE_ENV'] !== 'production') {
@@ -141,7 +144,7 @@ export class OtpService {
             const payload: OtpRequestedPayload = {
                 email: identifier,
                 otp: code,
-                purpose: 'REGISTER',
+                purpose,
                 expiresIn: this.OTP_TTL_SECONDS,
             };
             // Publish sự kiện OTP_REQUESTED lên Kafka để Notification Service có thể nhận
