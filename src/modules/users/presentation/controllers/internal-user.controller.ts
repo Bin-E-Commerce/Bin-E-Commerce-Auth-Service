@@ -23,6 +23,21 @@ export class InternalUserController {
     // Nhận UserService qua dependency injection để controller chỉ xử lý contract nội bộ.
     constructor(private readonly userService: UserService) {}
 
+    // Chỉ service đã qua internal-token guard và có user context từ Gateway mới đọc được profile cơ bản hiện tại.
+    @Get('copilot-profile')
+    async getCopilotProfile(@Headers('x-user-id') userId: string | undefined) {
+        if (!userId) {
+            throw new UnauthorizedException(
+                'Missing authenticated user context',
+            );
+        }
+        return {
+            data: await this.userService.getCopilotProfileByLocalId(userId),
+            message: 'Copilot profile retrieved',
+            statusCode: 200,
+        };
+    }
+
     // Cập nhật avatar từ Media Service và trả URL cũ để service gọi có thể dọn file S3 tương ứng.
     @Put('avatar')
     async updateAvatar(

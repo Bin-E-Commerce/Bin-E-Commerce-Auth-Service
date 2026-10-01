@@ -83,6 +83,28 @@ export class UserService {
         return user;
     }
 
+    // Trả đúng allowlist hồ sơ cơ bản cho Copilot nội bộ; không tải quan hệ, địa chỉ, giấy tờ hoặc session.
+    async getCopilotProfileByLocalId(localUserId: string): Promise<{
+        name: string;
+        email: string;
+        phone: string | null;
+        role: UserRole;
+        status: UserStatus;
+    }> {
+        const user = await this.userRepo.findOne({
+            where: { id: localUserId },
+            select: ['name', 'email', 'phone', 'role', 'status'],
+        });
+        if (!user) throw new NotFoundException('User not found');
+        return {
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            role: user.role,
+            status: user.status,
+        };
+    }
+
     // Lấy profile theo Keycloak sub cho các contract nội bộ truyền identity của Keycloak.
     async getProfileByKeycloakId(keycloakId: string): Promise<User> {
         const user = await this.userRepo.findOne({ where: { keycloakId } });
