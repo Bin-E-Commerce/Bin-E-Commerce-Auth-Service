@@ -8,6 +8,7 @@ describe('UserService copilot profile projection', () => {
         const userRepo = {
             findOne: jest.fn().mockResolvedValue({
                 name: 'Người bán thử nghiệm',
+                avatarUrl: 'https://cdn.example.test/avatar.jpg',
                 email: 'seller@example.test',
                 phone: '0900000000',
                 role: 'SELLER',
@@ -25,10 +26,11 @@ describe('UserService copilot profile projection', () => {
 
         expect(userRepo.findOne).toHaveBeenCalledWith({
             where: { id: 'user-id' },
-            select: ['name', 'email', 'phone', 'role', 'status'],
+            select: ['name', 'avatarUrl', 'email', 'phone', 'role', 'status'],
         });
         expect(result).toEqual({
             name: 'Người bán thử nghiệm',
+            avatarUrl: 'https://cdn.example.test/avatar.jpg',
             email: 'seller@example.test',
             phone: '0900000000',
             role: 'SELLER',

@@ -86,6 +86,7 @@ export class UserService {
     // Trả đúng allowlist hồ sơ cơ bản cho Copilot nội bộ; không tải quan hệ, địa chỉ, giấy tờ hoặc session.
     async getCopilotProfileByLocalId(localUserId: string): Promise<{
         name: string;
+        avatarUrl: string | null;
         email: string;
         phone: string | null;
         role: UserRole;
@@ -93,11 +94,12 @@ export class UserService {
     }> {
         const user = await this.userRepo.findOne({
             where: { id: localUserId },
-            select: ['name', 'email', 'phone', 'role', 'status'],
+            select: ['name', 'avatarUrl', 'email', 'phone', 'role', 'status'],
         });
         if (!user) throw new NotFoundException('User not found');
         return {
             name: user.name,
+            avatarUrl: user.avatarUrl,
             email: user.email,
             phone: user.phone,
             role: user.role,
