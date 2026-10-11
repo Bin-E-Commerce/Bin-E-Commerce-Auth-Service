@@ -24,19 +24,19 @@ export class SellerRoleAssignmentService {
         private readonly keycloakAdmin: KeycloakAdminService,
     ) {}
 
-    // Kafka event có thể phát lại nên thao tác phải idempotent. User/role được
-    // đọc trước để validate nhanh, còn transaction sẽ đọc lại user sau khi lock.
-    async grantApprovedSellerRole(keycloakUserId: string): Promise<void> {
+    // Seller-service phát userId nội bộ lấy từ header gateway, không phải Keycloak subject.
+    // Tra theo khóa nội bộ trước rồi đọc lại sau khi khóa transaction để event lặp an toàn.
+    async grantApprovedSellerRole(userId: string): Promise<void> {
         const [user, sellerRole] = await Promise.all([
             this.userRepository.findOne({
-                where: { keycloakId: keycloakUserId },
+                where: { id: userId },
             }),
             this.roleRepository.findOne({ where: { code: UserRole.SELLER } }),
         ]);
 
         if (!user) {
             throw new NotFoundException(
-                `Không tìm thấy user tương ứng Keycloak ID ${keycloakUserId}.`,
+                `Không tìm thấy user nội bộ ${userId} cho seller approval.`,
             );
         }
 
