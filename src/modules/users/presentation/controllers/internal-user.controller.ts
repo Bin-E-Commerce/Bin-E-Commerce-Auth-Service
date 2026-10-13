@@ -82,17 +82,17 @@ export class InternalUserController {
         return { email: user.email };
     }
 
-    // Trả về profile hiện thị tối thiểu cho danh sách review; endpoint chỉ mở cho service có internal token.
+    // Nhận ID nội bộ từ Product Service rồi trả profile hiển thị tối thiểu; không expose dữ liệu liên hệ.
     @Get('public-profiles')
     async getPublicProfiles(@Query('ids') idsHeader?: string) {
-        const keycloakIds = (idsHeader ?? '')
+        const userIds = (idsHeader ?? '')
             .split(',')
             .map((id) => id.trim())
             .filter(Boolean)
             .slice(0, 100);
 
         return {
-            data: await this.userService.getPublicProfiles(keycloakIds),
+            data: await this.userService.getPublicProfiles(userIds),
             message: 'Public profiles retrieved',
             statusCode: 200,
         };

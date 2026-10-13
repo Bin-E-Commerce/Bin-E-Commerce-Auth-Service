@@ -114,23 +114,24 @@ export class UserService {
         return user;
     }
 
-    // Chỉ trả tên và avatarUrl để các service nội bộ hiển thị profile công khai mà không lộ email hoặc số điện thoại.
-    async getPublicProfiles(keycloakIds: string[]): Promise<
+    // Tra cứu theo local user.id vì ProductReview lưu đúng ID nội bộ do Gateway inject.
+    // Chỉ chiếu tên/avatar cho card review; email, số điện thoại và quan hệ tài khoản luôn nằm ngoài contract.
+    async getPublicProfiles(userIds: string[]): Promise<
         Array<{
-            keycloakId: string;
+            userId: string;
             name: string;
             avatarUrl: string | null;
         }>
     > {
-        if (keycloakIds.length === 0) return [];
+        if (userIds.length === 0) return [];
 
         const users = await this.userRepo.find({
-            where: { keycloakId: In(keycloakIds) },
-            select: ['keycloakId', 'name', 'avatarUrl'],
+            where: { id: In(userIds) },
+            select: ['id', 'name', 'avatarUrl'],
         });
 
         return users.map((user) => ({
-            keycloakId: user.keycloakId,
+            userId: user.id,
             name: user.name,
             avatarUrl: user.avatarUrl,
         }));
