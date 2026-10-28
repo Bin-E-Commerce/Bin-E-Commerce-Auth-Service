@@ -1,4 +1,5 @@
 import type { Repository } from 'typeorm';
+import { NotFoundException } from '@nestjs/common';
 import { User } from '@/database/entities/user.entity';
 import { UserService } from '@/modules/users/application/services/user/user.service';
 
@@ -39,5 +40,58 @@ describe('UserService copilot profile projection', () => {
         expect(result).not.toHaveProperty('keycloakId');
         expect(result).not.toHaveProperty('addresses');
         expect(result).not.toHaveProperty('refreshTokens');
+    });
+});
+
+describe('UserService.getEmailByLocalId', () => {
+    let target: UserService;
+    let mockUserRepository: { findOne: jest.Mock };
+
+    beforeEach(() => {
+        mockUserRepository = { findOne: jest.fn() };
+        target = new UserService(
+            mockUserRepository as unknown as Repository<User>,
+            {} as never,
+            {} as never,
+            {} as never,
+        );
+    });
+
+    afterEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it('should read only email by the Auth DB user ID from finance events', async () => {
+        // Arrange
+        const localUserId = 'auth-user-id';
+        mockUserRepository.findOne.mockResolvedValue({
+            id: localUserId,
+            email: 'seller@example.test',
+        } as User);
+
+        // Act
+        const result = await target.getEmailByLocalId(localUserId);
+
+        // Assert
+        expect(result).toBe('seller@example.test');
+        expect(mockUserRepository.findOne).toHaveBeenCalledWith({
+            where: { id: localUserId },
+            select: ['id', 'email'],
+        });
+        expect(mockUserRepository.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('should throw when the local account no longer exists', async () => {
+        // Arrange
+        mockUserRepository.findOne.mockResolvedValue(null);
+
+        // Act & Assert
+        await expect(
+            target.getEmailByLocalId('deleted-user-id'),
+        ).rejects.toThrow(NotFoundException);
+        expect(mockUserRepository.findOne).toHaveBeenCalledWith({
+            where: { id: 'deleted-user-id' },
+            select: ['id', 'email'],
+        });
     });
 });

@@ -1,5 +1,5 @@
 // File này công bố các contract nội bộ của Auth Service cho service khác.
-// Các endpoint đều yêu cầu internal token và không cho caller tự chọn user ngoài x-user-id.
+// Mọi endpoint yêu cầu internal token; endpoint email chỉ trả đúng một trường theo ID trong route.
 
 import {
     Body,
@@ -80,6 +80,12 @@ export class InternalUserController {
     async getUserEmail(@Param('userId') userId: string) {
         const user = await this.userService.getProfileByKeycloakId(userId);
         return { email: user.email };
+    }
+
+    // Trả email theo Auth DB ID cho event nghiệp vụ; tách route để không nhầm với Keycloak subject ở contract cũ.
+    @Get('by-id/:userId/email')
+    async getUserEmailByLocalId(@Param('userId') userId: string) {
+        return { email: await this.userService.getEmailByLocalId(userId) };
     }
 
     // Nhận ID nội bộ từ Product Service rồi trả profile hiển thị tối thiểu; không expose dữ liệu liên hệ.

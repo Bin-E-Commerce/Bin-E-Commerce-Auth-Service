@@ -83,6 +83,17 @@ export class UserService {
         return user;
     }
 
+    // Chỉ trả email theo Auth DB ID mà Gateway và event nghiệp vụ đang dùng.
+    // Chọn đúng cột cần thiết để consumer không nhận profile hoặc thông tin nhạy cảm khác.
+    async getEmailByLocalId(localUserId: string): Promise<string> {
+        const user = await this.userRepo.findOne({
+            where: { id: localUserId },
+            select: ['id', 'email'],
+        });
+        if (!user) throw new NotFoundException('User not found');
+        return user.email;
+    }
+
     // Trả đúng allowlist hồ sơ cơ bản cho Copilot nội bộ; không tải quan hệ, địa chỉ, giấy tờ hoặc session.
     async getCopilotProfileByLocalId(localUserId: string): Promise<{
         name: string;
