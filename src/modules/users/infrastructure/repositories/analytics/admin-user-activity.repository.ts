@@ -7,12 +7,10 @@ import type {
 } from '@/modules/users/application/contracts/admin-user-activity.repository';
 
 @Injectable()
-export class AdminUserActivityRepository
-    implements AdminUserActivityRepositoryPort
-{
+export class AdminUserActivityRepository implements AdminUserActivityRepositoryPort {
     constructor(private readonly dataSource: DataSource) {}
 
-    // Dùng biên ngày theo giờ Việt Nam nhưng lọc cột timestamp trực tiếp để DB có thể tận dụng index created_at.
+    // Nhóm/định dạng theo cùng ngày giờ Việt Nam; lọc cột timestamp trực tiếp để DB tận dụng index created_at.
     async getNewUsersDaily(
         from: string,
         to: string,
@@ -20,7 +18,7 @@ export class AdminUserActivityRepository
         return this.dataSource.query(
             `
                 SELECT
-                    TO_CHAR(registered_user.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD') AS day,
+                    TO_CHAR((registered_user.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date, 'YYYY-MM-DD') AS day,
                     COUNT(*)::int AS count
                 FROM users AS registered_user
                 WHERE registered_user.role IN ('CUSTOMER', 'SELLER')
