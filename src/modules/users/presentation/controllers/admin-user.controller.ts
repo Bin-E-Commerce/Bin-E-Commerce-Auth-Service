@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AdminUserService } from '@/modules/users/application/services/admin/admin-user.service';
+import { AdminUserActivityService } from '@/modules/users/application/services/admin/admin-user-activity.service';
+import { AdminUserActivityQueryDto } from '@/modules/users/presentation/dto/admin-user-activity-query.dto';
 import { ListAdminUsersDto } from '@/modules/users/presentation/dto/list-admin-users.dto';
 import { RevokeAdminUserSessionDto } from '@/modules/users/presentation/dto/revoke-admin-user-session.dto';
 import { UpdateAdminUserRoleDto } from '@/modules/users/presentation/dto/update-admin-user-role.dto';
@@ -21,7 +23,23 @@ import { UpdateAdminUserStatusDto } from '@/modules/users/presentation/dto/updat
 // Controller chỉ nhận identity do Gateway inject; quyền ADMIN được xác minh lại từ local database trong service.
 @Controller('admin/users')
 export class AdminUserController {
-    constructor(private readonly adminUserService: AdminUserService) {}
+    constructor(
+        private readonly adminUserService: AdminUserService,
+        private readonly adminUserActivityService: AdminUserActivityService,
+    ) {}
+
+    // Tổng user mới chỉ dành cho admin đã được xác thực ở auth-service; response không chứa dữ liệu nhận dạng.
+    @Get('activity')
+    async activity(
+        @Headers('x-user-id') actorId: string,
+        @Query() query: AdminUserActivityQueryDto,
+    ) {
+        await this.authorize(actorId);
+        return this.adminUserActivityService.getNewUsersDaily(
+            query.from,
+            query.to,
+        );
+    }
 
     @Get()
     async list(

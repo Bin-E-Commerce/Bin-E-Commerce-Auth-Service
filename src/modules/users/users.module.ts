@@ -17,6 +17,9 @@ import { UserRoleAssignment } from '@/database/entities/user-role-assignment.ent
 import { UserAdminAuditLog } from '@/database/entities/user-admin-audit-log.entity';
 import { SellerRoleAssignmentService } from '@/modules/users/application/services/seller/seller-role-assignment.service';
 import { AdminUserService } from '@/modules/users/application/services/admin/admin-user.service';
+import { AdminUserActivityService } from '@/modules/users/application/services/admin/admin-user-activity.service';
+import { AdminUserActivityRepository } from '@/modules/users/infrastructure/repositories/analytics/admin-user-activity.repository';
+import { ADMIN_USER_ACTIVITY_REPOSITORY } from '@/modules/users/application/contracts/admin-user-activity.repository';
 import { SellerApplicationConsumer } from '@/kafka/consumers/seller-application.consumer';
 
 @Module({
@@ -41,6 +44,12 @@ import { SellerApplicationConsumer } from '@/kafka/consumers/seller-application.
     providers: [
         UserService,
         AdminUserService,
+        AdminUserActivityService,
+        AdminUserActivityRepository,
+        {
+            provide: ADMIN_USER_ACTIVITY_REPOSITORY,
+            useExisting: AdminUserActivityRepository,
+        },
         InternalServiceGuard,
         SellerRoleAssignmentService,
     ],
