@@ -1,3 +1,5 @@
+// Module đăng ký User persistence adapters và profile API cùng ranh giới Auth Service.
+
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
@@ -21,6 +23,9 @@ import { AdminUserActivityService } from '@/modules/users/application/services/a
 import { AdminUserActivityRepository } from '@/modules/users/infrastructure/repositories/analytics/admin-user-activity.repository';
 import { ADMIN_USER_ACTIVITY_REPOSITORY } from '@/modules/users/application/contracts/admin-user-activity.repository';
 import { SellerApplicationConsumer } from '@/kafka/consumers/seller-application.consumer';
+import { UserRefundBankAccountRepositoryAdapter } from '@/modules/users/infrastructure/repositories/profile/user-refund-bank-account.repository';
+import { USER_REFUND_BANK_ACCOUNT_REPOSITORY } from '@/modules/users/application/contracts/user-refund-bank-account.repository';
+import { UserRefundBankAccountService } from '@/modules/users/application/services/user/user-refund-bank-account.service';
 
 @Module({
     imports: [
@@ -43,6 +48,12 @@ import { SellerApplicationConsumer } from '@/kafka/consumers/seller-application.
     ],
     providers: [
         UserService,
+        UserRefundBankAccountService,
+        UserRefundBankAccountRepositoryAdapter,
+        {
+            provide: USER_REFUND_BANK_ACCOUNT_REPOSITORY,
+            useExisting: UserRefundBankAccountRepositoryAdapter,
+        },
         AdminUserService,
         AdminUserActivityService,
         AdminUserActivityRepository,

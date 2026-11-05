@@ -1,6 +1,9 @@
+// Controller profile nhận user ID đã được API Gateway xác thực và trả tài khoản nhận hoàn qua endpoint riêng.
+
 import {
     Controller,
     Get,
+    Header,
     Put,
     Post,
     Delete,
@@ -12,7 +15,9 @@ import {
     HttpStatus,
 } from '@nestjs/common';
 import { UserService } from '@/modules/users/application/services/user/user.service';
+import { UserRefundBankAccountService } from '@/modules/users/application/services/user/user-refund-bank-account.service';
 import { UpdateProfileDto } from '@/modules/users/presentation/dto/update-profile.dto';
+import { UpdateRefundBankAccountDto } from '@/modules/users/presentation/dto/update-refund-bank-account.dto';
 import { CreateAddressDto } from '@/modules/users/presentation/dto/create-address.dto';
 import { UpdateAddressDto } from '@/modules/users/presentation/dto/update-address.dto';
 import { User } from '@/database/entities/user.entity';
@@ -22,6 +27,7 @@ import { AccessControlService } from '@/modules/access-control/application/servi
 export class UserController {
     constructor(
         private readonly userService: UserService,
+        private readonly refundBankAccountService: UserRefundBankAccountService,
         private readonly accessControlService: AccessControlService,
     ) {}
 
@@ -44,6 +50,36 @@ export class UserController {
         return {
             data: await this.toUserResponse(user),
             message: 'Profile updated',
+            statusCode: 200,
+        };
+    }
+
+    // Trả tài khoản nhận hoàn của user hiện tại; x-user-id do Gateway gắn sau khi xác thực JWT.
+    @Get('me/refund-bank-account')
+    @Header('Cache-Control', 'private, no-store')
+    async getRefundBankAccount(@Headers('x-user-id') userId: string) {
+        const account = await this.refundBankAccountService.getForUser(userId);
+        return {
+            data: account,
+            message: 'Refund bank account retrieved',
+            statusCode: 200,
+        };
+    }
+
+    // Lưu tài khoản nhận hoàn mặc định mà không thêm dữ liệu nhạy cảm vào response profile tổng quát.
+    @Put('me/refund-bank-account')
+    @Header('Cache-Control', 'private, no-store')
+    async updateRefundBankAccount(
+        @Headers('x-user-id') userId: string,
+        @Body() dto: UpdateRefundBankAccountDto,
+    ) {
+        const account = await this.refundBankAccountService.saveForUser(
+            userId,
+            dto,
+        );
+        return {
+            data: account,
+            message: 'Refund bank account updated',
             statusCode: 200,
         };
     }
