@@ -1,4 +1,4 @@
-// Use case quản lý tài khoản nhận hoàn mặc định; dữ liệu được chuẩn hóa rồi lưu qua repository port chuyên biệt.
+// Use case quản lý danh sách tài khoản nhận hoàn; dữ liệu đã chuẩn hóa được lưu qua repository port.
 
 import {
     BadRequestException,
@@ -10,7 +10,10 @@ import {
 import { REFUND_BANK_OPTIONS } from '@/modules/users/application/constants/refund-bank-options.constant';
 import { USER_REFUND_BANK_ACCOUNT_REPOSITORY } from '@/modules/users/application/contracts/user-refund-bank-account.repository';
 import type { UserRefundBankAccountRepository } from '@/modules/users/application/contracts/user-refund-bank-account.repository';
-import type { RefundBankAccountProfile } from '@/modules/users/application/types/user/refund-bank-account.type';
+import type {
+    RefundBankAccountInput,
+    RefundBankAccountProfile,
+} from '@/modules/users/application/types/user/refund-bank-account.type';
 
 @Injectable()
 export class UserRefundBankAccountService {
@@ -19,17 +22,71 @@ export class UserRefundBankAccountService {
         private readonly refundBankAccountRepository: UserRefundBankAccountRepository,
     ) {}
 
-    // Đọc account riêng khỏi profile tổng quát để số tài khoản không bị phát tán qua AuthUser.
-    async getForUser(userId: string): Promise<RefundBankAccountProfile | null> {
-        return this.refundBankAccountRepository.findByUserId(userId);
+    // Chỉ trả danh sách của user hiện tại; số tài khoản không đi qua response profile tổng quát.
+    listForUser(userId: string): Promise<RefundBankAccountProfile[]> {
+        return this.refundBankAccountRepository.findAllForUser(userId);
     }
 
-    // Kiểm tra lại tại application boundary để caller nội bộ cũng không thể lưu sai ngân hàng hoặc dữ liệu nhận tiền.
-    async saveForUser(
+    // Chuẩn hóa và xác thực dữ liệu trước khi tạo tài khoản để API nội bộ cũng không lưu dữ liệu sai.
+    async createForUser(
         userId: string,
-        value: RefundBankAccountProfile,
+        value: RefundBankAccountInput,
     ): Promise<RefundBankAccountProfile> {
-        // Từ chối kiểu dữ liệu không hợp lệ trước khi gọi trim/normalize để lỗi đầu vào không biến thành lỗi 500.
+        const account = this.normalizeAccount(value);
+        const saved = await this.refundBankAccountRepository.createForUser(
+            userId,
+            account,
+        );
+        if (!saved) throw new NotFoundException('User not found');
+        return saved;
+    }
+
+    // Chỉ cập nhật bản ghi thuộc user hiện tại; ID của tài khoản không thể dùng để sửa dữ liệu user khác.
+    async updateForUser(
+        userId: string,
+        accountId: string,
+        value: RefundBankAccountInput,
+    ): Promise<RefundBankAccountProfile> {
+        const account = this.normalizeAccount(value);
+        const saved = await this.refundBankAccountRepository.updateForUser(
+            userId,
+            accountId,
+            account,
+        );
+        if (!saved)
+            throw new NotFoundException('Refund bank account not found');
+        return saved;
+    }
+
+    // Xóa theo cặp user/account; không tiết lộ tài khoản khác nếu ID không thuộc người gọi.
+    async deleteForUser(userId: string, accountId: string): Promise<void> {
+        const deleted = await this.refundBankAccountRepository.deleteForUser(
+            userId,
+            accountId,
+        );
+        if (!deleted)
+            throw new NotFoundException('Refund bank account not found');
+    }
+
+    // Đổi mặc định qua repository transaction để một user không thể có hai tài khoản mặc định.
+    async setDefaultForUser(
+        userId: string,
+        accountId: string,
+    ): Promise<RefundBankAccountProfile> {
+        const account =
+            await this.refundBankAccountRepository.setDefaultForUser(
+                userId,
+                accountId,
+            );
+        if (!account)
+            throw new NotFoundException('Refund bank account not found');
+        return account;
+    }
+
+    // Chuẩn hóa đúng danh mục ngân hàng, chữ cái/khoảng trắng trong tên và chuỗi số giữ nguyên số 0 đầu.
+    private normalizeAccount(
+        value: RefundBankAccountInput,
+    ): RefundBankAccountInput {
         if (
             !value ||
             typeof value.bankCode !== 'string' ||
@@ -44,7 +101,7 @@ export class UserRefundBankAccountService {
         const bank = REFUND_BANK_OPTIONS.find(
             (option) => option.code === bankCode,
         );
-        // Chỉ lưu cặp mã/tên khớp danh mục, tránh label giả gây nhầm ngân hàng khi admin hoàn tiền.
+        // Chỉ nhận cặp mã/tên trong danh mục hỗ trợ để ngăn label giả khi admin đối chiếu tài khoản.
         if (!bank || value.bankName.trim() !== bank.name) {
             throw new BadRequestException(
                 'Vui lòng chọn đúng ngân hàng trong danh sách hỗ trợ.',
@@ -56,36 +113,30 @@ export class UserRefundBankAccountService {
             .trim()
             .replace(/\s+/gu, ' ')
             .toLocaleUpperCase('vi-VN');
-        // Giữ đúng bộ ký tự DTO công khai chấp nhận; dấu được phép nhưng phải khớp tên ngân hàng hiển thị.
+        // Giữ đúng quy tắc ngân hàng đã thống nhất: tên chỉ có chữ Unicode và khoảng trắng.
         if (
             accountHolder.length < 2 ||
             accountHolder.length > 100 ||
-            !/^\p{L}[\p{L}\p{M}]*(?:[ .'-][\p{L}\p{M}]+)*$/u.test(accountHolder)
+            !/^\p{L}[\p{L}\p{M}]*(?: \p{L}[\p{L}\p{M}]*)*$/u.test(accountHolder)
         ) {
             throw new BadRequestException(
-                "Tên chủ tài khoản chỉ được gồm chữ cái, khoảng trắng, dấu chấm (.), dấu nháy đơn ('), hoặc dấu gạch nối (-).",
+                'Tên chủ tài khoản chỉ được gồm chữ cái có dấu và khoảng trắng.',
             );
         }
 
         const accountNumber = value.accountNumber.trim();
-        // Giữ số 0 đầu tài khoản; chỉ nhận chuỗi 6–30 chữ số, không ép qua kiểu number.
+        // Không chuyển số tài khoản sang number để giữ số 0 đầu và giới hạn đầu vào ở 6–30 chữ số.
         if (!/^\d{6,30}$/.test(accountNumber)) {
             throw new BadRequestException(
                 'Số tài khoản phải có từ 6 đến 30 chữ số.',
             );
         }
 
-        const account = {
+        return {
             bankCode: bank.code,
             bankName: bank.name,
             accountHolder,
             accountNumber,
         };
-        const saved = await this.refundBankAccountRepository.saveForUser(
-            userId,
-            account,
-        );
-        if (!saved) throw new NotFoundException('User not found');
-        return saved;
     }
 }

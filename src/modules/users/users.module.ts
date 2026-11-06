@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { User } from '@/database/entities/user.entity';
 import { UserAddress } from '@/database/entities/user-address.entity';
+import { UserRefundBankAccount } from '@/database/entities/user-refund-bank-account.entity';
 import { RefreshToken } from '@/database/entities/refresh-token.entity';
 
 import { UserService } from '@/modules/users/application/services/user/user.service';
@@ -32,6 +33,7 @@ import { UserRefundBankAccountService } from '@/modules/users/application/servic
         TypeOrmModule.forFeature([
             User,
             UserAddress,
+            UserRefundBankAccount,
             RefreshToken,
             AccessRole,
             UserRoleAssignment,

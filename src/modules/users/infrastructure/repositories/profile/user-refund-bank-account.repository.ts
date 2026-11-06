@@ -1,69 +1,206 @@
-// Adapter đọc/ghi tài khoản nhận hoàn trong hồ sơ User, tách query TypeORM khỏi application service.
+// Adapter lưu tài khoản hoàn theo owner; truy vấn số tài khoản chỉ được mở trong thao tác hồ sơ chuyên biệt.
 
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 
+import { UserRefundBankAccount } from '@/database/entities/user-refund-bank-account.entity';
 import { User } from '@/database/entities/user.entity';
 import type { UserRefundBankAccountRepository } from '@/modules/users/application/contracts/user-refund-bank-account.repository';
-import type { RefundBankAccountProfile } from '@/modules/users/application/types/user/refund-bank-account.type';
+import type {
+    RefundBankAccountInput,
+    RefundBankAccountProfile,
+} from '@/modules/users/application/types/user/refund-bank-account.type';
 
-// Chỉ truy vấn bốn cột nhạy cảm qua addSelect; các truy vấn User thông thường vẫn bị select:false bảo vệ.
 @Injectable()
 export class UserRefundBankAccountRepositoryAdapter implements UserRefundBankAccountRepository {
-    constructor(
-        @InjectRepository(User)
-        private readonly userRepository: Repository<User>,
-    ) {}
+    constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-    // Trả null khi user chưa lưu đủ tài khoản, để giao diện mở form trống thay vì hiện dữ liệu một phần.
-    async findByUserId(
+    // Trả tài khoản theo mặc định trước, sau đó theo ngày tạo; chỉ response endpoint đã xác thực mới đọc số đầy đủ.
+    async findAllForUser(userId: string): Promise<RefundBankAccountProfile[]> {
+        const accounts = await this.accountRepository()
+            .createQueryBuilder('account')
+            .addSelect('account.accountNumber')
+            .where('account.userId = :userId', { userId })
+            .orderBy('account.isDefault', 'DESC')
+            .addOrderBy('account.createdAt', 'ASC')
+            .getMany();
+        return accounts.map((account) => this.toProfile(account));
+    }
+
+    // Khóa user trước khi kiểm tra danh sách để thao tác đồng thời không thể tạo hai tài khoản mặc định.
+    async createForUser(
         userId: string,
+        account: RefundBankAccountInput,
     ): Promise<RefundBankAccountProfile | null> {
-        const user = await this.userRepository
-            .createQueryBuilder('user')
-            .select('user.id')
-            .addSelect([
-                'user.refundBankCode',
-                'user.refundBankName',
-                'user.refundAccountHolder',
-                'user.refundAccountNumber',
-            ])
-            .where('user.id = :userId', { userId })
-            .getOne();
+        return this.dataSource.transaction(async (manager) => {
+            const user = await manager
+                .getRepository(User)
+                .createQueryBuilder('user')
+                .select('user.id')
+                .where('user.id = :userId', { userId })
+                .setLock('pessimistic_write')
+                .getOne();
+            if (!user) return null;
 
-        if (
-            !user?.refundBankCode ||
-            !user.refundBankName ||
-            !user.refundAccountHolder ||
-            !user.refundAccountNumber
-        ) {
-            return null;
-        }
+            const repository = manager.getRepository(UserRefundBankAccount);
+            const duplicate = await repository
+                .createQueryBuilder('account')
+                .addSelect('account.accountNumber')
+                .where('account.userId = :userId', { userId })
+                .andWhere('account.bankCode = :bankCode', {
+                    bankCode: account.bankCode,
+                })
+                .andWhere('account.accountHolder = :accountHolder', {
+                    accountHolder: account.accountHolder,
+                })
+                .andWhere('account.accountNumber = :accountNumber', {
+                    accountNumber: account.accountNumber,
+                })
+                .getOne();
+            // Retry gửi lại cùng dữ liệu sẽ trả tài khoản đã có thay vì tạo bản sao trong hồ sơ.
+            if (duplicate) return this.toProfile(duplicate);
 
+            const accountCount = await repository.countBy({ userId });
+            const created = repository.create({
+                userId,
+                ...account,
+                isDefault: accountCount === 0,
+            });
+            return this.toProfile(await repository.save(created));
+        });
+    }
+
+    // Cập nhật đúng tài khoản thuộc user trong transaction, giữ nguyên trạng thái mặc định của bản ghi.
+    async updateForUser(
+        userId: string,
+        accountId: string,
+        account: RefundBankAccountInput,
+    ): Promise<RefundBankAccountProfile | null> {
+        return this.dataSource.transaction(async (manager) => {
+            const repository = manager.getRepository(UserRefundBankAccount);
+            const existing = await this.findScopedAccount(
+                repository,
+                userId,
+                accountId,
+                true,
+            );
+            if (!existing) return null;
+            return this.toProfile(
+                await repository.save({ ...existing, ...account }),
+            );
+        });
+    }
+
+    // Nếu xóa tài khoản mặc định, chọn tài khoản được tạo sớm nhất còn lại trước khi commit.
+    async deleteForUser(userId: string, accountId: string): Promise<boolean> {
+        return this.dataSource.transaction(async (manager) => {
+            const repository = manager.getRepository(UserRefundBankAccount);
+            const user = await manager
+                .getRepository(User)
+                .createQueryBuilder('user')
+                .select('user.id')
+                .where('user.id = :userId', { userId })
+                .setLock('pessimistic_write')
+                .getOne();
+            if (!user) return false;
+
+            const account = await this.findScopedAccount(
+                repository,
+                userId,
+                accountId,
+                true,
+            );
+            if (!account) return false;
+            await repository.delete({ id: accountId, userId });
+
+            if (account.isDefault) {
+                const replacement = await repository.findOne({
+                    where: { userId },
+                    order: { createdAt: 'ASC' },
+                });
+                if (replacement) {
+                    await repository.update(
+                        { id: replacement.id, userId },
+                        { isDefault: true },
+                    );
+                }
+            }
+            return true;
+        });
+    }
+
+    // Khóa user, bỏ cờ mặc định hiện tại rồi gắn cờ mới trong cùng transaction.
+    async setDefaultForUser(
+        userId: string,
+        accountId: string,
+    ): Promise<RefundBankAccountProfile | null> {
+        return this.dataSource.transaction(async (manager) => {
+            const user = await manager
+                .getRepository(User)
+                .createQueryBuilder('user')
+                .select('user.id')
+                .where('user.id = :userId', { userId })
+                .setLock('pessimistic_write')
+                .getOne();
+            if (!user) return null;
+
+            const repository = manager.getRepository(UserRefundBankAccount);
+            const target = await this.findScopedAccount(
+                repository,
+                userId,
+                accountId,
+                true,
+            );
+            if (!target) return null;
+            if (!target.isDefault) {
+                await repository.update(
+                    { userId, isDefault: true },
+                    { isDefault: false },
+                );
+                await repository.update(
+                    { id: accountId, userId },
+                    { isDefault: true },
+                );
+            }
+            return this.toProfile(
+                target.isDefault ? target : { ...target, isDefault: true },
+            );
+        });
+    }
+
+    // Query số tài khoản tường minh vì entity mặc định ẩn cột này khỏi truy vấn TypeORM.
+    private async findScopedAccount(
+        repository: Repository<UserRefundBankAccount>,
+        userId: string,
+        accountId: string,
+        lock: boolean,
+    ): Promise<UserRefundBankAccount | null> {
+        const query = repository
+            .createQueryBuilder('account')
+            .addSelect('account.accountNumber')
+            .where('account.id = :accountId', { accountId })
+            .andWhere('account.userId = :userId', { userId });
+        if (lock) query.setLock('pessimistic_write');
+        return query.getOne();
+    }
+
+    // Chỉ ánh xạ các trường cần cho endpoint hồ sơ, không trả relationship hoặc timestamp persistence.
+    private toProfile(
+        account: UserRefundBankAccount,
+    ): RefundBankAccountProfile {
         return {
-            bankCode: user.refundBankCode,
-            bankName: user.refundBankName,
-            accountHolder: user.refundAccountHolder,
-            accountNumber: user.refundAccountNumber,
+            id: account.id,
+            bankCode: account.bankCode,
+            bankName: account.bankName,
+            accountHolder: account.accountHolder,
+            accountNumber: account.accountNumber,
+            isDefault: account.isDefault,
         };
     }
 
-    // Cập nhật đúng hồ sơ được định danh bởi Gateway; null báo application rằng local user không còn tồn tại.
-    async saveForUser(
-        userId: string,
-        account: RefundBankAccountProfile,
-    ): Promise<RefundBankAccountProfile | null> {
-        const result = await this.userRepository.update(
-            { id: userId },
-            {
-                refundBankCode: account.bankCode,
-                refundBankName: account.bankName,
-                refundAccountHolder: account.accountHolder,
-                refundAccountNumber: account.accountNumber,
-            },
-        );
-
-        return result.affected ? account : null;
+    // Lấy repository qua DataSource để mọi thao tác transaction dùng đúng EntityManager đang được khóa.
+    private accountRepository(): Repository<UserRefundBankAccount> {
+        return this.dataSource.getRepository(UserRefundBankAccount);
     }
 }

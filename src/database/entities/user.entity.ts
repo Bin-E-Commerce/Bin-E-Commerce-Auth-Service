@@ -12,6 +12,7 @@ import {
 import { UserRole } from '@common/enums/user-role.enum';
 import { UserStatus } from '@common/enums/user-status.enum';
 import { UserAddress } from '@/database/entities/user-address.entity';
+import { UserRefundBankAccount } from '@/database/entities/user-refund-bank-account.entity';
 import { RefreshToken } from '@/database/entities/refresh-token.entity';
 
 @Entity('users')
@@ -28,43 +29,6 @@ export class User {
 
     @Column({ type: 'varchar', length: 20, nullable: true })
     phone: string | null;
-
-    // Các cột tài khoản hoàn được ẩn khỏi truy vấn User thông thường để tránh lộ qua API hồ sơ tổng quát.
-    @Column({
-        name: 'refund_bank_code',
-        type: 'varchar',
-        length: 50,
-        nullable: true,
-        select: false,
-    })
-    refundBankCode: string | null;
-
-    @Column({
-        name: 'refund_bank_name',
-        type: 'varchar',
-        length: 100,
-        nullable: true,
-        select: false,
-    })
-    refundBankName: string | null;
-
-    @Column({
-        name: 'refund_account_holder',
-        type: 'varchar',
-        length: 100,
-        nullable: true,
-        select: false,
-    })
-    refundAccountHolder: string | null;
-
-    @Column({
-        name: 'refund_account_number',
-        type: 'varchar',
-        length: 30,
-        nullable: true,
-        select: false,
-    })
-    refundAccountNumber: string | null;
 
     // Keycloak ID là một UUID được Keycloak gán cho mỗi người dùng khi họ được tạo ra trong hệ thống Keycloak.
     // Việc lưu trữ keycloakId trong bảng users giúp chúng ta có thể liên kết trực tiếp giữa người dùng trong hệ thống của chúng ta với người dùng tương ứng trong Keycloak,
@@ -94,6 +58,9 @@ export class User {
 
     @OneToMany(() => UserAddress, (address) => address.user)
     addresses: UserAddress[];
+
+    @OneToMany(() => UserRefundBankAccount, (account) => account.user)
+    refundBankAccounts: UserRefundBankAccount[];
 
     @OneToMany(() => RefreshToken, (token) => token.user)
     refreshTokens: RefreshToken[];

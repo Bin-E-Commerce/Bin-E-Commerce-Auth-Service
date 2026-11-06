@@ -1,15 +1,28 @@
-// Port lưu một tài khoản nhận hoàn mặc định; dữ liệu nhạy cảm chỉ đi qua thao tác đọc/ghi chuyên biệt.
+// Port quản lý danh sách tài khoản hoàn; mọi thao tác ghi đều giới hạn theo user sở hữu.
 
-import type { RefundBankAccountProfile } from '@/modules/users/application/types/user/refund-bank-account.type';
+import type {
+    RefundBankAccountInput,
+    RefundBankAccountProfile,
+} from '@/modules/users/application/types/user/refund-bank-account.type';
 
 export const USER_REFUND_BANK_ACCOUNT_REPOSITORY = Symbol(
     'USER_REFUND_BANK_ACCOUNT_REPOSITORY',
 );
 
 export interface UserRefundBankAccountRepository {
-    findByUserId(userId: string): Promise<RefundBankAccountProfile | null>;
-    saveForUser(
+    findAllForUser(userId: string): Promise<RefundBankAccountProfile[]>;
+    createForUser(
         userId: string,
-        account: RefundBankAccountProfile,
+        account: RefundBankAccountInput,
+    ): Promise<RefundBankAccountProfile | null>;
+    updateForUser(
+        userId: string,
+        accountId: string,
+        account: RefundBankAccountInput,
+    ): Promise<RefundBankAccountProfile | null>;
+    deleteForUser(userId: string, accountId: string): Promise<boolean>;
+    setDefaultForUser(
+        userId: string,
+        accountId: string,
     ): Promise<RefundBankAccountProfile | null>;
 }

@@ -28,9 +28,9 @@ export class UpdateRefundBankAccountDto {
     @IsString()
     @MinLength(2)
     @MaxLength(100)
-    @Matches(/^\p{L}[\p{L}\p{M}]*(?:[ .'-][\p{L}\p{M}]+)*$/u, {
+    @Matches(/^\p{L}[\p{L}\p{M}]*(?: \p{L}[\p{L}\p{M}]*)*$/u, {
         message:
-            "Tên chủ tài khoản chỉ được gồm chữ cái, khoảng trắng, dấu chấm (.), dấu nháy đơn ('), hoặc dấu gạch nối (-).",
+            'Tên chủ tài khoản chỉ được gồm chữ cái có dấu và khoảng trắng.',
     })
     @Transform(({ value }) =>
         typeof value === 'string'

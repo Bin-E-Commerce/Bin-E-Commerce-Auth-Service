@@ -54,32 +54,87 @@ export class UserController {
         };
     }
 
-    // Trả tài khoản nhận hoàn của user hiện tại; x-user-id do Gateway gắn sau khi xác thực JWT.
-    @Get('me/refund-bank-account')
+    // Trả danh sách tài khoản ngân hàng của user hiện tại; x-user-id được Gateway gắn sau khi xác thực JWT.
+    @Get('me/refund-bank-accounts')
     @Header('Cache-Control', 'private, no-store')
-    async getRefundBankAccount(@Headers('x-user-id') userId: string) {
-        const account = await this.refundBankAccountService.getForUser(userId);
+    async listRefundBankAccounts(@Headers('x-user-id') userId: string) {
+        const accounts =
+            await this.refundBankAccountService.listForUser(userId);
         return {
-            data: account,
-            message: 'Refund bank account retrieved',
+            data: accounts,
+            message: 'Refund bank accounts retrieved',
             statusCode: 200,
         };
     }
 
-    // Lưu tài khoản nhận hoàn mặc định mà không thêm dữ liệu nhạy cảm vào response profile tổng quát.
-    @Put('me/refund-bank-account')
+    // Tạo tài khoản nhận hoàn; repository tự chọn làm mặc định khi đây là tài khoản đầu tiên của user.
+    @Post('me/refund-bank-accounts')
     @Header('Cache-Control', 'private, no-store')
-    async updateRefundBankAccount(
+    @HttpCode(HttpStatus.CREATED)
+    async createRefundBankAccount(
         @Headers('x-user-id') userId: string,
         @Body() dto: UpdateRefundBankAccountDto,
     ) {
-        const account = await this.refundBankAccountService.saveForUser(
+        const account = await this.refundBankAccountService.createForUser(
             userId,
             dto,
         );
         return {
             data: account,
+            message: 'Refund bank account created',
+            statusCode: 201,
+        };
+    }
+
+    // Cập nhật tài khoản theo ID và owner để một customer không thể sửa tài khoản của người khác.
+    @Put('me/refund-bank-accounts/:id')
+    @Header('Cache-Control', 'private, no-store')
+    async updateRefundBankAccount(
+        @Headers('x-user-id') userId: string,
+        @Param('id', ParseUUIDPipe) accountId: string,
+        @Body() dto: UpdateRefundBankAccountDto,
+    ) {
+        const account = await this.refundBankAccountService.updateForUser(
+            userId,
+            accountId,
+            dto,
+        );
+        return {
+            data: account,
             message: 'Refund bank account updated',
+            statusCode: 200,
+        };
+    }
+
+    // Xóa tài khoản theo owner; nếu đó là mặc định, use case chọn tài khoản còn lại làm mặc định.
+    @Delete('me/refund-bank-accounts/:id')
+    @Header('Cache-Control', 'private, no-store')
+    async deleteRefundBankAccount(
+        @Headers('x-user-id') userId: string,
+        @Param('id', ParseUUIDPipe) accountId: string,
+    ) {
+        await this.refundBankAccountService.deleteForUser(userId, accountId);
+        return {
+            data: null,
+            message: 'Refund bank account deleted',
+            statusCode: 200,
+        };
+    }
+
+    // Đặt mặc định qua transaction để bảng chỉ có một tài khoản nhận hoàn chính cho mỗi customer.
+    @Put('me/refund-bank-accounts/:id/default')
+    @Header('Cache-Control', 'private, no-store')
+    async setDefaultRefundBankAccount(
+        @Headers('x-user-id') userId: string,
+        @Param('id', ParseUUIDPipe) accountId: string,
+    ) {
+        const account = await this.refundBankAccountService.setDefaultForUser(
+            userId,
+            accountId,
+        );
+        return {
+            data: account,
+            message: 'Default refund bank account updated',
             statusCode: 200,
         };
     }
