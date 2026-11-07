@@ -27,6 +27,7 @@ import { SellerApplicationConsumer } from '@/kafka/consumers/seller-application.
 import { UserRefundBankAccountRepositoryAdapter } from '@/modules/users/infrastructure/repositories/profile/user-refund-bank-account.repository';
 import { USER_REFUND_BANK_ACCOUNT_REPOSITORY } from '@/modules/users/application/contracts/user-refund-bank-account.repository';
 import { UserRefundBankAccountService } from '@/modules/users/application/services/user/user-refund-bank-account.service';
+import { OrderRefundRecipientClient } from '@/modules/users/application/clients/order-refund-recipient.client';
 
 @Module({
     imports: [
@@ -51,6 +52,7 @@ import { UserRefundBankAccountService } from '@/modules/users/application/servic
     providers: [
         UserService,
         UserRefundBankAccountService,
+        OrderRefundRecipientClient,
         UserRefundBankAccountRepositoryAdapter,
         {
             provide: USER_REFUND_BANK_ACCOUNT_REPOSITORY,

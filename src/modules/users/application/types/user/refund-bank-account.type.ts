@@ -11,3 +11,12 @@ export interface RefundBankAccountProfile extends RefundBankAccountInput {
     id: string;
     isDefault: boolean;
 }
+
+// Dữ liệu service-to-service chuyển các refund đang chờ sang tài khoản vừa sửa.
+export interface RefundBankAccountSyncInput {
+    userId: string;
+    accountId: string;
+    allowSingleAccountLegacySync: boolean;
+    previousAccount: RefundBankAccountInput;
+    account: RefundBankAccountInput;
+}

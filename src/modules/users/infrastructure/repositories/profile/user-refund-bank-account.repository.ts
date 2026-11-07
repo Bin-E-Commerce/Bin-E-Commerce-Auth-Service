@@ -28,6 +28,20 @@ export class UserRefundBankAccountRepositoryAdapter implements UserRefundBankAcc
         return accounts.map((account) => this.toProfile(account));
     }
 
+    // Chỉ đọc một tài khoản thuộc user để đồng bộ chính xác các yêu cầu hoàn đang chờ.
+    async findForUser(
+        userId: string,
+        accountId: string,
+    ): Promise<RefundBankAccountProfile | null> {
+        const account = await this.findScopedAccount(
+            this.accountRepository(),
+            userId,
+            accountId,
+            false,
+        );
+        return account ? this.toProfile(account) : null;
+    }
+
     // Khóa user trước khi kiểm tra danh sách để thao tác đồng thời không thể tạo hai tài khoản mặc định.
     async createForUser(
         userId: string,

@@ -16,12 +16,16 @@ import {
 import { UpdateAvatarInternalDto } from '@/modules/users/presentation/dto/update-avatar-internal.dto';
 import { InternalServiceGuard } from '@/modules/users/presentation/guards/internal-service.guard';
 import { UserService } from '@/modules/users/application/services/user/user.service';
+import { UserRefundBankAccountService } from '@/modules/users/application/services/user/user-refund-bank-account.service';
 
 @Controller('internal/users')
 @UseGuards(InternalServiceGuard)
 export class InternalUserController {
     // Nhận UserService qua dependency injection để controller chỉ xử lý contract nội bộ.
-    constructor(private readonly userService: UserService) {}
+    constructor(
+        private readonly userService: UserService,
+        private readonly refundBankAccountService: UserRefundBankAccountService,
+    ) {}
 
     // Chỉ service đã qua internal-token guard và có user context từ Gateway mới đọc được profile cơ bản hiện tại.
     @Get('copilot-profile')
@@ -73,6 +77,19 @@ export class InternalUserController {
                 'Missing authenticated user context',
             );
         return this.userService.getOwnedAddress(userId, addressId);
+    }
+
+    // Order Service chỉ nhận tài khoản hoàn nếu account ID thuộc đúng user đã xác thực ở Gateway.
+    @Get('refund-bank-accounts/:accountId')
+    async getOwnedRefundBankAccount(
+        @Headers('x-user-id') userId: string | undefined,
+        @Param('accountId', new ParseUUIDPipe()) accountId: string,
+    ) {
+        if (!userId)
+            throw new UnauthorizedException(
+                'Missing authenticated user context',
+            );
+        return this.refundBankAccountService.getForUser(userId, accountId);
     }
 
     // Trả email của user theo keycloakId cho service nội bộ gửi thông báo; caller không được đọc thêm profile hoặc credential.

@@ -11,6 +11,10 @@ export const USER_REFUND_BANK_ACCOUNT_REPOSITORY = Symbol(
 
 export interface UserRefundBankAccountRepository {
     findAllForUser(userId: string): Promise<RefundBankAccountProfile[]>;
+    findForUser(
+        userId: string,
+        accountId: string,
+    ): Promise<RefundBankAccountProfile | null>;
     createForUser(
         userId: string,
         account: RefundBankAccountInput,
